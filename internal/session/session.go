@@ -10,9 +10,11 @@ import (
 // stateInstructions is the instruction text for the state question.
 const stateInstructions = "`transcript_tail` is the most recent " +
 	"terminal output of a coding agent (`agent_kind`) running in a " +
-	"terminal pane. Classify what the pane is doing right now, " +
-	"judged by the last few screens of output, giving most weight " +
-	"to the final lines."
+	"terminal pane. `input_line` is the text currently sitting in " +
+	"the agent's input box, extracted by code (empty string if the " +
+	"box is empty or was not found). Classify what the pane is " +
+	"doing right now, judged by the last few screens of output, " +
+	"giving most weight to the final lines."
 
 // coherentInstructions is the instruction text for the coherent
 // question.
@@ -27,6 +29,7 @@ type Verdict struct {
 	Confidence    float64            `json:"confidence"`
 	Probabilities map[string]float64 `json:"probabilities"`
 	Coherent      float64            `json:"coherent"`
+	InputLine     string             `json:"input_line"`
 	Model         string             `json:"model"`
 	Usage         jev.Usage          `json:"usage"`
 }
@@ -37,20 +40,23 @@ func stateCriteria() map[string]string {
 	return map[string]string{
 		"working": "The agent is actively producing coherent, " +
 			"on-task output: tool calls, code, file edits, test " +
-			"runs, or prose that advances a task. A spinner or " +
-			"'thinking' indicator with recent coherent output " +
-			"counts as working.",
-		"idle": "The agent has finished and is waiting at its " +
-			"input prompt with nothing typed and no dialog. A " +
-			"completed answer followed by an empty prompt line is " +
-			"idle.",
+			"runs, or prose that advances a task. A spinner, " +
+			"elapsed-time counter, or 'thinking' indicator on " +
+			"screen counts as working. Text in `input_line` does " +
+			"not, by itself, mean the agent is working.",
+		"idle": "The agent has finished and is waiting for input. " +
+			"`input_line` is empty or holds only the tool's " +
+			"placeholder hint (for example 'Ask Codex to do " +
+			"anything'), and there is no dialog.",
 		"dialog": "A modal question, approval prompt, folder-trust " +
 			"prompt, update notice, usage-limit or rate-limit " +
 			"notice, or any UI that waits for a keypress or choice " +
 			"before the agent can continue.",
-		"unsubmitted": "Text has been typed into the agent's input " +
-			"line or composer but not submitted; the agent is not " +
-			"working on it.",
+		"unsubmitted": "`input_line` holds text a person typed (an " +
+			"instruction, question, or partial message, not the " +
+			"tool's placeholder hint), and no spinner, progress " +
+			"line, or tool call shows the agent acting on it. The " +
+			"text has been typed but not sent.",
 		"error": "The agent's work ended with an API error, crash, " +
 			"stack trace, connection failure, or process exit, and " +
 			"it is not continuing.",
@@ -90,11 +96,13 @@ func Questions() map[string]jev.Question {
 	}
 }
 
-// State builds the request state for a cleaned tail.
+// State builds the request state for a cleaned tail, including the
+// input line extracted from it.
 func State(agentKind, tail string) map[string]any {
 	return map[string]any{
 		"agent_kind":      agentKind,
 		"transcript_tail": tail,
+		"input_line":      InputLine(tail),
 	}
 }
 
@@ -102,8 +110,14 @@ func State(agentKind, tail string) map[string]any {
 // tail cleaned using the defaults. Model is left empty so the client
 // or the caller fills it.
 func Request(agentKind, rawTail string) jev.Request {
+	return requestFor(agentKind, Clean(rawTail, MaxLines, MaxBytes))
+}
+
+// requestFor builds the request from an already-cleaned tail, so
+// Judge cleans once and reports what the cleaning extracted.
+func requestFor(agentKind, cleaned string) jev.Request {
 	return jev.Request{
-		State:     State(agentKind, Clean(rawTail, MaxLines, MaxBytes)),
+		State:     State(agentKind, cleaned),
 		Questions: Questions(),
 	}
 }
@@ -116,7 +130,9 @@ func Judge(
 	c *jev.Client,
 	agentKind, rawTail string,
 ) (Verdict, error) {
-	resp, err := c.Ask(ctx, Request(agentKind, rawTail))
+	cleaned := Clean(rawTail, MaxLines, MaxBytes)
+
+	resp, err := c.Ask(ctx, requestFor(agentKind, cleaned))
 	if err != nil {
 		return Verdict{}, err
 	}
@@ -142,6 +158,7 @@ func Judge(
 		Confidence:    confidence,
 		Probabilities: probs,
 		Coherent:      coherent,
+		InputLine:     InputLine(cleaned),
 		Model:         resp.Model,
 		Usage:         resp.Usage,
 	}, nil

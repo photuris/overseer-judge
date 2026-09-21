@@ -58,6 +58,56 @@ func TestCleanGhostSuggestionFixture(t *testing.T) {
 	if !strings.Contains(got, "\n❯\n") {
 		t.Errorf("the composer line is not a bare prompt:\n%s", got)
 	}
+	if line := InputLine(got); line != "" {
+		t.Errorf("InputLine = %q, want empty", line)
+	}
+}
+
+func TestInputLine(t *testing.T) {
+	tests := []struct {
+		name, cleaned, want string
+	}{
+		{"claude composer", "❯ go ahead", "go ahead"},
+		{"bare marker", "❯\u00a0", ""},
+		{"codex placeholder", "› Ask Codex to do anything",
+			"Ask Codex to do anything"},
+		{"menu option", "› 1. Yes, continue", ""},
+		{
+			name:    "the last marker line wins",
+			cleaned: "❯ first\nsome output\n❯ second",
+			want:    "second",
+		},
+		{
+			name:    "a boxed marker is not the input line",
+			cleaned: "│ ❯ 1. Yes, proceed │",
+			want:    "",
+		},
+		{"no marker", "just output\nmore output", ""},
+		{"empty", "", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := InputLine(tt.cleaned); got != tt.want {
+				t.Errorf("InputLine(%q) = %q, want %q",
+					tt.cleaned, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStateCarriesTheInputLine(t *testing.T) {
+	got := State("claude", "output\n❯ ship it")
+	if got["input_line"] != "ship it" {
+		t.Errorf("input_line = %v, want \"ship it\"",
+			got["input_line"])
+	}
+	if got["agent_kind"] != "claude" {
+		t.Errorf("agent_kind = %v, want claude", got["agent_kind"])
+	}
+	if got["transcript_tail"] != "output\n❯ ship it" {
+		t.Errorf("transcript_tail = %v", got["transcript_tail"])
+	}
 }
 
 func TestCleanStripsEscapesAndGlyphs(t *testing.T) {
@@ -201,7 +251,8 @@ func judgeAgainst(
 
 func TestJudgeMapsEveryField(t *testing.T) {
 	v, req, err := judgeAgainst(
-		t, goodResponse, "claude", "done\r\n\x1b[2mghost\x1b[0m",
+		t, goodResponse, "claude",
+		"done\r\n❯ ship it\x1b[2m and the ghost\x1b[0m",
 	)
 	if err != nil {
 		t.Fatalf("Judge: %v", err)
@@ -219,6 +270,9 @@ func TestJudgeMapsEveryField(t *testing.T) {
 	if v.Coherent != 0.97 {
 		t.Errorf("Coherent = %v, want 0.97", v.Coherent)
 	}
+	if v.InputLine != "ship it" {
+		t.Errorf("InputLine = %q, want \"ship it\"", v.InputLine)
+	}
 	if v.Model != "jev-1" {
 		t.Errorf("Model = %q, want jev-1", v.Model)
 	}
@@ -233,9 +287,13 @@ func TestJudgeMapsEveryField(t *testing.T) {
 	if state["agent_kind"] != "claude" {
 		t.Errorf("agent_kind = %v, want claude", state["agent_kind"])
 	}
-	if state["transcript_tail"] != "done" {
+	if state["transcript_tail"] != "done\n❯ ship it" {
 		t.Errorf("transcript_tail = %q, want the cleaned tail",
 			state["transcript_tail"])
+	}
+	if state["input_line"] != "ship it" {
+		t.Errorf("input_line = %q, want the extracted line",
+			state["input_line"])
 	}
 	if req["model"] != "jev-test" {
 		t.Errorf("model = %v, want jev-test", req["model"])
@@ -278,7 +336,8 @@ func TestJudgeRejectsBadAnswers(t *testing.T) {
 				t.Errorf("error is %T (%v), want *jev.ResponseError",
 					err, err)
 			}
-			if v.State != "" || v.Probabilities != nil {
+			if v.State != "" || v.Probabilities != nil ||
+				v.InputLine != "" {
 				t.Errorf("verdict = %+v, want the zero value", v)
 			}
 		})

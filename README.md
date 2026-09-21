@@ -73,6 +73,7 @@ stdout is one compact JSON object; `--pretty` indents it:
     "degraded": 0.0
   },
   "coherent": 0.97,
+  "input_line": "",
   "model": "jev-latest",
   "usage": {"input_tokens": 1183, "output_tokens": 9}
 }
@@ -80,6 +81,13 @@ stdout is one compact JSON object; `--pretty` indents it:
 
 `--agent` takes `claude`, `codex`, or `unknown` (the default) and is
 passed to the model as context.
+
+`input_line` is the text the tool found sitting in the agent's input
+box, extracted in code rather than left to the model: the last line
+starting with `❯` or `›`, minus the marker, empty when the box is
+empty or holds a dialog menu option. It is sent as part of the state
+and echoed in the verdict, so a caller can see what the classifier was
+told.
 
 **Feed it ANSI, not plain text.** Only ANSI input lets the tool drop an
 agent's greyed-out prompt suggestion, which Claude Code renders as

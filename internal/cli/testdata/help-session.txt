@@ -2,7 +2,7 @@ overseer-judge session --input <path|-> [flags]
 
 classify an agent pane's transcript tail read from --input
 
-Output: the verdict as one JSON object: state, confidence, probabilities, coherent, model, usage.
+Output: the verdict as one JSON object: state, confidence, probabilities, coherent, input_line, model, usage.
 
 Flags:
   -agent string

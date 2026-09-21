@@ -3,6 +3,7 @@
 package session
 
 import (
+	"regexp"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -268,4 +269,41 @@ func capBytes(lines []string, maxBytes int) string {
 	}
 
 	return text
+}
+
+// inputMarkers are the runes agents draw the left edge of their input
+// box with.
+const inputMarkers = "❯›"
+
+// menuOption matches a dialog menu option sitting under the cursor,
+// such as "1. Yes, continue".
+var menuOption = regexp.MustCompile(`^\d+\.\s`)
+
+// InputLine returns the text sitting in the agent's input box, or "".
+// It scans cleaned (post-Clean) text from the bottom for the last
+// line whose first rune is ❯ (U+276F) or › (U+203A), and returns that
+// line with the marker and any following spaces or U+00A0 removed,
+// then trimmed. A menu option under a dialog cursor is not typed
+// input and yields ""; so does a bare marker and text with no marker
+// line at all.
+func InputLine(cleaned string) string {
+	lines := strings.Split(cleaned, "\n")
+
+	for i := len(lines) - 1; i >= 0; i-- {
+		marker, size := utf8.DecodeRuneInString(lines[i])
+		if !strings.ContainsRune(inputMarkers, marker) {
+			continue
+		}
+
+		text := strings.TrimSpace(
+			strings.TrimLeft(lines[i][size:], "  "),
+		)
+		if menuOption.MatchString(text) {
+			return ""
+		}
+
+		return text
+	}
+
+	return ""
 }

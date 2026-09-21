@@ -37,7 +37,8 @@ func sessionCommand() command {
 		summary: "classify an agent pane's transcript tail read from --input",
 		args:    "--input <path|-> [flags]",
 		output: "the verdict as one JSON object: state, " +
-			"confidence, probabilities, coherent, model, usage.",
+			"confidence, probabilities, coherent, input_line, " +
+			"model, usage.",
 		example: sessionExample,
 		flags: func(fs *flag.FlagSet) {
 			fs.StringVar(&input, "input", "",
