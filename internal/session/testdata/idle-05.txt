@@ -1,0 +1,33 @@
+
+ [0m[1m[38;2;138;190;183mpi[0m[38;2;102;102;102m v0.86.0[0m                                                                                                                              
+ [0m[38;2;102;102;102mescape[0m[38;2;128;128;128m interrupt · [0m[38;2;102;102;102mctrl+c/ctrl+d[0m[38;2;128;128;128m clear/exit · [0m[38;2;102;102;102m/[0m[38;2;128;128;128m commands · [0m[38;2;102;102;102m![0m[38;2;128;128;128m bash · [0m[38;2;102;102;102mctrl+o[0m[38;2;128;128;128m more[0m                                                         
+ [0m[38;2;102;102;102mPress ctrl+o to show full startup help and loaded resources.[0m                                                                            
+                                                                                                                                         
+ [0m[38;2;102;102;102mPi can explain its own features and look up its docs. Ask it how to use or extend Pi.[0m                                                   
+
+[0m[38;2;240;198;116m[Skills][0m                                                                                                                                 
+[0m[38;2;102;102;102m  api-client-libraries, apple-health, cli-utilities, coding-principles, computer-use, cpp-style, cronometer-nutrition, csharp-style,     [0m
+[0m[38;2;102;102;102mdefuddle, diagnose-crash, doc-coauthoring, docx, finances-db, find-skills, genome-lookup, git-commit-style, go-style, herdr,             [0m
+[0m[38;2;102;102;102mhermes-configuration, javascript-style, json-canvas, markdown-style, mcp-builder, meeting-notes, middleware-projects, obsidian-bases,    [0m
+[0m[38;2;102;102;102mobsidian-cli, obsidian-vault, omarchy, omarchy-desktop-apps, orca-cli, orchestration, oura-health, overseer, pdf, peptide-experiments,   [0m
+[0m[38;2;102;102;102mpersonal-webapp-design, pptx, python-style, qmd-claude-history, recap, shabti-labs-design, vault-consolidate-memory, vault-distill,      [0m
+[0m[38;2;102;102;102mvault-ingest, vault-lint, vault-process-inbox, writing-principles, writing-principles-technical, xlsx[0m                                    
+
+[0m[38;2;240;198;116m[Extensions][0m                                                                                                                             
+[0m[38;2;102;102;102m  @ollama/pi-web-search, herdr-agent-state.ts, moshi-hooks.ts, orca-agent-status.ts, orca-prefill.ts, orca-titlebar-spinner.ts[0m           
+
+[0m[38;2;240;198;116m[Themes][0m                                                                                                                                 
+[0m[38;2;102;102;102m  omarchy-system[0m                                                                                                                         
+
+
+[0m[38;2;255;255;0m─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+ [0m[1m[38;2;255;255;0mUpdate Available[0m                                                                                                                        
+ [0m[38;2;128;128;128mNew version 0.86.1 is available. Run [0m[38;2;138;190;183mpi update[0m                                                                                          
+ [0m[38;2;128;128;128mChangelog: [0m[38;2;138;190;183mhttps://pi.dev/changelog[0m                                                                                                     
+[0m[38;2;255;255;0m─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+
+[0m[38;2;80;80;80m─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+[0m[7m [0m                                                                                                                                        
+[0m[38;2;80;80;80m─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[0m
+[0m[38;2;102;102;102m/tmp/claude-1000/-home-joshua-Projects-agent-skills/23edc16b-74db-4b4f-82d7-650e1078ed5f/scratchpad/tui.7ie9[0m
+[0m[38;2;102;102;102m0.0%/1.0M (auto)                                                                                             (ollama) glm-5.3-flash:cloud[0m
