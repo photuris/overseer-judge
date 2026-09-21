@@ -670,10 +670,11 @@ func lastNonEmpty(lines []string, n int) []string {
 
 // interruptHint returns the last line carrying an interrupt phrase,
 // its whitespace collapsed to single spaces and cut to maxHint runes.
-// Matching is case-insensitive; every phrase is ASCII.
+// Matching folds ASCII A-Z only: strings.ToLower would fold runes
+// such as U+0130 into a phrase that the line does not carry.
 func interruptHint(lines []string) (string, bool) {
 	for i := len(lines) - 1; i >= 0; i-- {
-		lower := strings.ToLower(lines[i])
+		lower := strings.Map(asciiLower, lines[i])
 		for _, phrase := range interruptPhrases {
 			if strings.Contains(lower, phrase) {
 				return cutRunes(collapseSpaces(lines[i])), true
@@ -687,13 +688,15 @@ func interruptHint(lines []string) (string, bool) {
 // labelHint returns the label on the last labelled rule, which is how
 // pi says it is working: "──  Working ────…" yields "Working". A rule
 // of nothing but rule runes carries no label, so it is not found.
+// The label comes off the trimmed line, as isRule tests it, so that
+// an indented plain rule stays unlabelled.
 func labelHint(lines []string) (string, bool) {
 	for i := len(lines) - 1; i >= 0; i-- {
 		if !isRule(lines[i]) {
 			continue
 		}
 
-		label := strings.Map(dropRuleRune, lines[i])
+		label := strings.Map(dropRuleRune, strings.TrimSpace(lines[i]))
 		if label == "" {
 			continue
 		}
@@ -702,6 +705,15 @@ func labelHint(lines []string) (string, bool) {
 	}
 
 	return "", false
+}
+
+// asciiLower lower-cases A-Z and leaves every other rune alone.
+func asciiLower(r rune) rune {
+	if 'A' <= r && r <= 'Z' {
+		return r - 'A' + 'a'
+	}
+
+	return r
 }
 
 // dropRuleRune deletes pi's rule rune and keeps everything else.

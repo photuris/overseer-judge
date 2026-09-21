@@ -856,6 +856,18 @@ func TestActivityHint(t *testing.T) {
 			want:    "ESC TO INTERRUPT",
 		},
 		{
+			name:    "uppercase matches without the to as well",
+			kind:    "opencode",
+			cleaned: "ESC INTERRUPT",
+			want:    "ESC INTERRUPT",
+		},
+		{
+			name:    "a dotted capital I does not fold to ASCII i",
+			kind:    "opencode",
+			cleaned: "ESC \u0130NTERRUPT",
+			want:    "",
+		},
+		{
 			name:    "opencode drops the to",
 			kind:    "opencode",
 			cleaned: "⬝⬝⬝⬝  esc interrupt  tab agents",
@@ -916,6 +928,18 @@ func TestActivityHint(t *testing.T) {
 			kind:    "pi",
 			cleaned: "all done\n── " + rule,
 			want:    "",
+		},
+		{
+			name:    "an indented plain rule hides no earlier label",
+			kind:    "pi",
+			cleaned: labelled(" Working") + "\n  " + rule,
+			want:    "Working",
+		},
+		{
+			name:    "an indented plain rule hides none for unknown",
+			kind:    "unknown",
+			cleaned: labelled(" Working") + "\n  " + rule,
+			want:    "Working",
 		},
 		{
 			name:    "the last labelled rule wins",
