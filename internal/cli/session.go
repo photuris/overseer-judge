@@ -13,7 +13,9 @@ import (
 )
 
 // agentKinds are the accepted --agent values.
-var agentKinds = []string{"claude", "codex", "unknown"}
+var agentKinds = []string{
+	"claude", "codex", "pi", "opencode", "unknown",
+}
 
 // sessionExample is the example shown in `session --help`. The note
 // is part of the contract: only ANSI input lets Clean drop an agent's
@@ -25,7 +27,10 @@ const sessionExample = `# ANSI input is preferred. Only ANSI lets the tool
 # text the user typed and has not submitted.
 herdr agent read <pane> --lines 60 \
   --source recent-unwrapped --format ansi |
-  overseer-judge session --input - --agent claude`
+  overseer-judge session --input - --agent claude
+
+tmux capture-pane -p -e -J -S -60 -t <pane> |
+  overseer-judge session --input - --agent pi`
 
 // sessionCommand returns the session verb: it classifies what an
 // agent's terminal pane is doing from the tail of its transcript.
@@ -44,7 +49,8 @@ func sessionCommand() command {
 			fs.StringVar(&input, "input", "",
 				"transcript tail; - reads stdin (required)")
 			fs.StringVar(&agent, "agent", "unknown",
-				"agent kind: claude, codex, or unknown")
+				"agent kind: claude, codex, pi, opencode, "+
+					"or unknown")
 		},
 		run: func(
 			ctx context.Context,
@@ -80,7 +86,8 @@ func runSession(
 	}
 	if !slices.Contains(agentKinds, agent) {
 		return usagef(
-			"invalid --agent %q: want claude, codex, or unknown",
+			"invalid --agent %q: want claude, codex, pi, "+
+				"opencode, or unknown",
 			agent,
 		)
 	}

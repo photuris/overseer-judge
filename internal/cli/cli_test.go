@@ -412,6 +412,75 @@ func TestRawInputFromFile(t *testing.T) {
 	}
 }
 
+// ── session agent kinds ─────────────────────────────────────────────────────
+
+// TestSessionAcceptsEveryAgentKind checks the five accepted --agent
+// values through --dry-run, which needs no key and no network.
+func TestSessionAcceptsEveryAgentKind(t *testing.T) {
+	fixture := filepath.Join(
+		"..", "session", "testdata", "unsubmitted-04.txt",
+	)
+
+	for _, kind := range []string{
+		"claude", "codex", "pi", "opencode", "unknown",
+	} {
+		t.Run(kind, func(t *testing.T) {
+			noKey(t)
+
+			got := invoke(t, "", "session", "--dry-run",
+				"--input", fixture, "--agent", kind)
+			if got.code != 0 {
+				t.Fatalf("code = %d, stderr = %s",
+					got.code, got.stderr)
+			}
+
+			body, ok := dryRunBody(t, got.stdout)["body"].(map[string]any)
+			if !ok {
+				t.Fatalf("no body in %s", got.stdout)
+			}
+			state, ok := body["state"].(map[string]any)
+			if !ok {
+				t.Fatalf("no state in %s", got.stdout)
+			}
+			if state["agent_kind"] != kind {
+				t.Errorf("agent_kind = %v, want %s",
+					state["agent_kind"], kind)
+			}
+		})
+	}
+}
+
+// TestSessionRejectsOtherAgentKinds covers the usage error: it exits
+// 2 and its message names all five accepted values.
+func TestSessionRejectsOtherAgentKinds(t *testing.T) {
+	noKey(t)
+
+	fixture := filepath.Join(
+		"..", "session", "testdata", "idle-05.txt",
+	)
+
+	got := invoke(t, "", "session", "--dry-run",
+		"--input", fixture, "--agent", "gemini")
+	if got.code != exitUsage {
+		t.Fatalf("code = %d, want %d (stderr %s)",
+			got.code, exitUsage, got.stderr)
+	}
+	if ty := errType(t, got.stderr); ty != "usage" {
+		t.Errorf("error type = %q, want usage", ty)
+	}
+	if got.stdout != "" {
+		t.Errorf("stdout = %q, want empty", got.stdout)
+	}
+	for _, kind := range []string{
+		"claude", "codex", "pi", "opencode", "unknown",
+	} {
+		if !strings.Contains(got.stderr, kind) {
+			t.Errorf("stderr does not name %q: %s",
+				kind, got.stderr)
+		}
+	}
+}
+
 // ── session request parity ──────────────────────────────────────────────────
 
 // sessionVerdict is the body the session server returns.

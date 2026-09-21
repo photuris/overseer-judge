@@ -60,6 +60,9 @@ probability that a watcher can threshold on its own.
 ```sh
 herdr agent read <pane> --lines 60 --source recent-unwrapped \
   --format ansi | overseer-judge session --input - --agent claude
+
+tmux capture-pane -p -e -J -S -60 -t <pane> \
+  | overseer-judge session --input - --agent pi
 ```
 
 stdout is one compact JSON object; `--pretty` indents it:
@@ -83,15 +86,26 @@ stdout is one compact JSON object; `--pretty` indents it:
 }
 ```
 
-`--agent` takes `claude`, `codex`, or `unknown` (the default) and is
-passed to the model as context.
+`--agent` takes `claude`, `codex`, `pi`, `opencode`, or `unknown` (the
+default). It is passed to the model as context, and it picks how the
+input box is found.
 
 `input_line` is the text the tool found sitting in the agent's input
-box, extracted in code rather than left to the model: the last line
-starting with `❯` or `›`, minus the marker, empty when the box is
-empty or holds a dialog menu option. It is sent as part of the state
-and echoed in the verdict, so a caller can see what the classifier was
-told.
+box, extracted in code rather than left to the model. Each agent draws
+that box differently, so each kind gets its own strategy:
+
+- `claude`, `codex` — the last line starting with `❯` or `›`, minus
+  the marker.
+- `opencode` — the `┃` box sitting above the `╹` foot, minus the
+  status line at its bottom.
+- `pi` — the lines between the last two `─` rules.
+- `unknown` — marker, then box, then rules. The first structure found
+  wins, even when the text inside it is empty.
+
+The result is empty when the box is empty, when it holds a dialog menu
+option, or when it holds a placeholder hint such as `Ask anything…`.
+It is sent as part of the state and echoed in the verdict, so a caller
+can see what the classifier was told.
 
 **Feed it ANSI, not plain text.** Only ANSI input lets the tool drop an
 agent's greyed-out prompt suggestion, which Claude Code renders as

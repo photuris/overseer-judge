@@ -48,10 +48,13 @@ func stateCriteria() map[string]string {
 			"`input_line` is empty or holds only the tool's " +
 			"placeholder hint (for example 'Ask Codex to do " +
 			"anything'), and there is no dialog.",
-		"dialog": "A modal question, approval prompt, folder-trust " +
-			"prompt, update notice, usage-limit or rate-limit " +
-			"notice, or any UI that waits for a keypress or choice " +
-			"before the agent can continue.",
+		"dialog": "A modal UI that blocks the agent until a person " +
+			"responds: an approval or permission prompt, a " +
+			"folder-trust prompt, a numbered or yes/no choice " +
+			"under a cursor, or a usage-limit or rate-limit screen " +
+			"that must be dismissed before work can continue. " +
+			"Informational banners, warnings, update notices, and " +
+			"tips that do not wait for a keypress are not dialogs.",
 		"unsubmitted": "`input_line` holds text a person typed (an " +
 			"instruction, question, or partial message, not the " +
 			"tool's placeholder hint), and no spinner, progress " +
@@ -102,7 +105,7 @@ func State(agentKind, tail string) map[string]any {
 	return map[string]any{
 		"agent_kind":      agentKind,
 		"transcript_tail": tail,
-		"input_line":      InputLine(tail),
+		"input_line":      InputLine(agentKind, tail),
 	}
 }
 
@@ -158,7 +161,7 @@ func Judge(
 		Confidence:    confidence,
 		Probabilities: probs,
 		Coherent:      coherent,
-		InputLine:     InputLine(cleaned),
+		InputLine:     InputLine(agentKind, cleaned),
 		Model:         resp.Model,
 		Usage:         resp.Usage,
 	}, nil

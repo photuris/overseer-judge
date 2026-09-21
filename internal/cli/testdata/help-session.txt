@@ -6,7 +6,7 @@ Output: the verdict as one JSON object: state, confidence, probabilities, cohere
 
 Flags:
   -agent string
-    	agent kind: claude, codex, or unknown (default "unknown")
+    	agent kind: claude, codex, pi, opencode, or unknown (default "unknown")
   -dry-run
     	print the request that would be sent and exit 0
   -input string
@@ -28,3 +28,6 @@ Example:
   herdr agent read <pane> --lines 60 \
     --source recent-unwrapped --format ansi |
     overseer-judge session --input - --agent claude
+  
+  tmux capture-pane -p -e -J -S -60 -t <pane> |
+    overseer-judge session --input - --agent pi

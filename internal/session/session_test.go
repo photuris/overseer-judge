@@ -105,7 +105,7 @@ func TestCleanFaintColourParameters(t *testing.T) {
 func TestInputLineIgnoresColouredGhost(t *testing.T) {
 	const raw = "❯ \x1b[2mghost\x1b[38;5;22m suggestion\x1b[0m"
 
-	if got := InputLine(Clean(raw, 0, 0)); got != "" {
+	if got := InputLine("claude", Clean(raw, 0, 0)); got != "" {
 		t.Errorf("InputLine = %q, want empty", got)
 	}
 }
@@ -123,39 +123,238 @@ func TestCleanGhostSuggestionFixture(t *testing.T) {
 	if !strings.Contains(got, "\n❯\n") {
 		t.Errorf("the composer line is not a bare prompt:\n%s", got)
 	}
-	if line := InputLine(got); line != "" {
+	if line := InputLine("claude", got); line != "" {
 		t.Errorf("InputLine = %q, want empty", line)
 	}
 }
 
+// composer builds an opencode box: bar lines followed by the foot.
+func composer(lines ...string) string {
+	out := make([]string, 0, len(lines)+1)
+	for _, line := range lines {
+		out = append(out, "  ┃  "+line)
+	}
+
+	return strings.Join(append(out, "  ╹▀▀▀▀"), "\n")
+}
+
+// rule is a pi composer rule, and shortRule is one rune too short to
+// count as one.
+var (
+	rule      = strings.Repeat("─", minRule)
+	shortRule = strings.Repeat("─", minRule-1)
+)
+
 func TestInputLine(t *testing.T) {
 	tests := []struct {
-		name, cleaned, want string
+		name, kind, cleaned, want string
 	}{
-		{"claude composer", "❯ go ahead", "go ahead"},
-		{"bare marker", "❯\u00a0", ""},
-		{"codex placeholder", "› Ask Codex to do anything",
-			"Ask Codex to do anything"},
-		{"menu option", "› 1. Yes, continue", ""},
+		// marker
+		{"claude composer", "claude", "❯ go ahead", "go ahead"},
+		{"bare marker", "claude", "❯\u00a0", ""},
+		{"codex hint", "codex", "› Ask Codex to do anything", ""},
+		{"menu option", "codex", "› 1. Yes, continue", ""},
 		{
 			name:    "the last marker line wins",
+			kind:    "claude",
 			cleaned: "❯ first\nsome output\n❯ second",
 			want:    "second",
 		},
 		{
 			name:    "a boxed marker is not the input line",
+			kind:    "claude",
 			cleaned: "│ ❯ 1. Yes, proceed │",
 			want:    "",
 		},
-		{"no marker", "just output\nmore output", ""},
-		{"empty", "", ""},
+		{"no marker", "claude", "just output\nmore output", ""},
+		{"empty", "claude", "", ""},
+
+		// box
+		{
+			name:    "the box joins its input lines",
+			kind:    "opencode",
+			cleaned: composer("first line", "second line", "status"),
+			want:    "first line second line",
+		},
+		{
+			name:    "a box holding only a status line is empty",
+			kind:    "opencode",
+			cleaned: composer("", "status", ""),
+			want:    "",
+		},
+		{
+			name: "the bottom box wins",
+			kind: "opencode",
+			cleaned: composer("upper", "status") + "\nreply\n" +
+				composer("lower", "status"),
+			want: "lower",
+		},
+		{
+			name:    "a bar run without a foot is not a box",
+			kind:    "opencode",
+			cleaned: "  ┃  quoted reply\n  ┃  more reply",
+			want:    "",
+		},
+
+		// rules
+		{
+			name:    "the text between the last two rules",
+			kind:    "pi",
+			cleaned: rule + "\nnotice\n" + rule + "\ntyped\n" + rule,
+			want:    "typed",
+		},
+		{
+			name:    "an empty composer between two rules",
+			kind:    "pi",
+			cleaned: rule + "\ntyped\n" + rule + "\n\n" + rule,
+			want:    "",
+		},
+		{
+			name:    "one rule is not a composer",
+			kind:    "pi",
+			cleaned: "typed\n" + rule,
+			want:    "",
+		},
+		{
+			name:    "a short rule is not a rule",
+			kind:    "pi",
+			cleaned: shortRule + "\ntyped\n" + rule,
+			want:    "",
+		},
+		{
+			name:    "rules survive CRLF through Clean",
+			kind:    "pi",
+			cleaned: Clean(rule+"\r\ntyped\r\n"+rule, 0, 0),
+			want:    "typed",
+		},
+
+		// strategy selection
+		{
+			name:    "pi ignores a marker line",
+			kind:    "pi",
+			cleaned: rule + "\ntyped\n" + rule + "\n❯ ignored",
+			want:    "typed",
+		},
+		{
+			name:    "claude ignores rules",
+			kind:    "claude",
+			cleaned: rule + "\ntyped\n" + rule,
+			want:    "",
+		},
+		{
+			name:    "unknown prefers the marker over rules",
+			kind:    "unknown",
+			cleaned: rule + "\ntyped\n" + rule + "\n❯ marked",
+			want:    "marked",
+		},
+		{
+			name:    "unknown keeps an empty marker over rules",
+			kind:    "unknown",
+			cleaned: rule + "\ntyped\n" + rule + "\n❯",
+			want:    "",
+		},
+		{
+			name: "unknown prefers the box over rules",
+			kind: "unknown",
+			cleaned: rule + "\ntyped\n" + rule + "\n" +
+				composer("", "status"),
+			want: "",
+		},
+		{
+			name:    "unknown falls through a bar run to the rules",
+			kind:    "unknown",
+			cleaned: rule + "\ntyped\n" + rule + "\n  ┃  reply",
+			want:    "typed",
+		},
+
+		// placeholders
+		{
+			name:    "a bare placeholder is dropped",
+			kind:    "opencode",
+			cleaned: composer("Ask anything…", "status"),
+			want:    "",
+		},
+		{
+			name: "a placeholder with an example is dropped",
+			kind: "opencode",
+			cleaned: composer(
+				`Ask anything… "What is the tech stack?"`, "status",
+			),
+			want: "",
+		},
+		{
+			name:    "a typed question that starts alike is kept",
+			kind:    "opencode",
+			cleaned: composer("Ask anything about X", "status"),
+			want:    "Ask anything about X",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := InputLine(tt.cleaned); got != tt.want {
-				t.Errorf("InputLine(%q) = %q, want %q",
-					tt.cleaned, got, tt.want)
+			got := InputLine(tt.kind, tt.cleaned)
+			if got != tt.want {
+				t.Errorf("InputLine(%q, %q) = %q, want %q",
+					tt.kind, tt.cleaned, got, tt.want)
+			}
+		})
+	}
+}
+
+// fixtureInputLines is what every fixture's input box holds. Each is
+// listed under the agent that drew it and under unknown, which must
+// reach the same answer without being told.
+var fixtureInputLines = map[string]string{
+	"degraded-01.txt":    "",
+	"degraded-02.txt":    "",
+	"dialog-01.txt":      "",
+	"dialog-02.txt":      "",
+	"error-01.txt":       "",
+	"error-02.txt":       "",
+	"idle-01.txt":        "",
+	"idle-02.txt":        "",
+	"idle-03.txt":        "",
+	"idle-04.txt":        "",
+	"idle-05.txt":        "",
+	"unsubmitted-01.txt": "go ahead and stub resources/tmux.md",
+	"unsubmitted-02.txt": "take option 2, and add a test that the " +
+		"cooked path has no escapes",
+	"unsubmitted-03.txt": "refactor the parser to use a state table",
+	"unsubmitted-04.txt": "add a regression test for the empty case",
+	"working-01.txt":     "",
+	"working-02.txt":     "",
+}
+
+// fixtureAgents names the agent that drew each of the captures this
+// task added. The rest are Claude Code and Codex captures, already
+// covered by the unknown pass.
+var fixtureAgents = map[string]string{
+	"idle-04.txt":        "opencode",
+	"unsubmitted-03.txt": "opencode",
+	"idle-05.txt":        "pi",
+	"unsubmitted-04.txt": "pi",
+}
+
+func TestInputLineOnFixtures(t *testing.T) {
+	for name, want := range fixtureInputLines {
+		t.Run(name, func(t *testing.T) {
+			raw, err := os.ReadFile(filepath.Join("testdata", name))
+			if err != nil {
+				t.Fatalf("read fixture: %v", err)
+			}
+			cleaned := Clean(string(raw), MaxLines, MaxBytes)
+
+			kinds := []string{"unknown"}
+			if kind, ok := fixtureAgents[name]; ok {
+				kinds = append(kinds, kind)
+			}
+
+			for _, kind := range kinds {
+				got := InputLine(kind, cleaned)
+				if got != want {
+					t.Errorf("InputLine(%q, %s) = %q, want %q",
+						kind, name, got, want)
+				}
 			}
 		})
 	}
@@ -433,9 +632,12 @@ const (
 	wantIdle = "The agent has finished and is waiting for input. `input_line` " +
 		"is empty or holds only the tool's placeholder hint (for example 'Ask " +
 		"Codex to do anything'), and there is no dialog."
-	wantDialog = "A modal question, approval prompt, folder-trust prompt, " +
-		"update notice, usage-limit or rate-limit notice, or any UI that waits " +
-		"for a keypress or choice before the agent can continue."
+	wantDialog = "A modal UI that blocks the agent until a person responds: " +
+		"an approval or permission prompt, a folder-trust prompt, a numbered " +
+		"or yes/no choice under a cursor, or a usage-limit or rate-limit " +
+		"screen that must be dismissed before work can continue. " +
+		"Informational banners, warnings, update notices, and tips that do " +
+		"not wait for a keypress are not dialogs."
 	wantUnsubmitted = "`input_line` holds text a person typed (an " +
 		"instruction, question, or partial message, not the tool's placeholder " +
 		"hint), and no spinner, progress line, or tool call shows the agent " +

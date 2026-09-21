@@ -327,20 +327,95 @@ func capBytes(lines []string, maxBytes int) string {
 // box with.
 const inputMarkers = "❯›"
 
+// The runes opencode draws its composer box with: a bar down the left
+// edge of every line, and a foot under the last one.
+const (
+	boxBar  = '┃'
+	boxFoot = '╹'
+)
+
+// ruleRune is the glyph pi draws its horizontal rules with, and
+// minRule is how many of them a line needs to count as one.
+const (
+	ruleRune = '─'
+	minRule  = 20
+)
+
 // menuOption matches a dialog menu option sitting under the cursor,
 // such as "1. Yes, continue".
 var menuOption = regexp.MustCompile(`^\d+\.\s`)
 
+// placeholderHints are the prompts agents draw in an empty input box.
+// Text starting with one of them was not typed by a person.
+//
+// ponytail: literal prefixes; agents reword these across versions.
+// Add entries here; the idle criterion's placeholder clause is the
+// backstop.
+var placeholderHints = []string{
+	"Ask Codex to do anything",
+	"Ask anything…",
+}
+
+// strategy finds an agent's input box in the cleaned lines of a pane
+// and returns the text in it. found reports whether the structure the
+// strategy looks for was there at all, which is not the same as the
+// text being non-empty: an empty box is found and empty.
+type strategy func(lines []string) (text string, found bool)
+
 // InputLine returns the text sitting in the agent's input box, or "".
-// It scans cleaned (post-Clean) text from the bottom for the last
-// line whose first rune is ❯ (U+276F) or › (U+203A), and returns that
-// line with the marker and any following spaces or U+00A0 removed,
-// then trimmed. A menu option under a dialog cursor is not typed
-// input and yields ""; so does a bare marker and text with no marker
-// line at all.
-func InputLine(cleaned string) string {
+// cleaned is post-Clean text. It runs the strategies for agentKind in
+// order and returns the result of the FIRST strategy that finds its
+// structure, even when the text it finds is empty. Known placeholder
+// hints are then dropped.
+//
+//	claude, codex: marker
+//	opencode:      box
+//	pi:            rules
+//	unknown (or anything else): marker, then box, then rules
+func InputLine(agentKind, cleaned string) string {
 	lines := strings.Split(cleaned, "\n")
 
+	for _, find := range strategiesFor(agentKind) {
+		if text, found := find(lines); found {
+			return dropPlaceholder(text)
+		}
+	}
+
+	return ""
+}
+
+// strategiesFor returns the strategies to try for an agent kind, in
+// order. An unrecognised kind tries all three.
+func strategiesFor(agentKind string) []strategy {
+	switch agentKind {
+	case "claude", "codex":
+		return []strategy{markerInput}
+	case "opencode":
+		return []strategy{boxInput}
+	case "pi":
+		return []strategy{rulesInput}
+	default:
+		return []strategy{markerInput, boxInput, rulesInput}
+	}
+}
+
+// dropPlaceholder returns "" when text is one of the placeholder
+// hints, and text unchanged otherwise.
+func dropPlaceholder(text string) string {
+	for _, hint := range placeholderHints {
+		if strings.HasPrefix(text, hint) {
+			return ""
+		}
+	}
+
+	return text
+}
+
+// markerInput finds the last line whose first rune is ❯ or › and
+// returns it with the marker and any following spaces or U+00A0
+// removed, then trimmed. A menu option under a dialog cursor is not
+// typed input and yields "", as does a bare marker.
+func markerInput(lines []string) (string, bool) {
 	for i := len(lines) - 1; i >= 0; i-- {
 		marker, size := utf8.DecodeRuneInString(lines[i])
 		if !strings.ContainsRune(inputMarkers, marker) {
@@ -351,11 +426,112 @@ func InputLine(cleaned string) string {
 			strings.TrimLeft(lines[i][size:], "  "),
 		)
 		if menuOption.MatchString(text) {
-			return ""
+			return "", true
 		}
 
-		return text
+		return text, true
 	}
 
-	return ""
+	return "", false
+}
+
+// boxInput finds opencode's composer: the lowest run of lines whose
+// first non-space rune is a bar, sitting directly above a line whose
+// first non-space rune is the foot. The last non-empty line inside
+// the box is the status line, not input, so it is dropped.
+func boxInput(lines []string) (string, bool) {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if firstRune(lines[i]) != boxFoot {
+			continue
+		}
+
+		top := i
+		for top > 0 && firstRune(lines[top-1]) == boxBar {
+			top--
+		}
+		if top == i {
+			continue
+		}
+
+		return boxText(lines[top:i]), true
+	}
+
+	return "", false
+}
+
+// boxText strips the bar from every line of a composer box, drops the
+// blank lines and the status line that follows them, and joins what
+// is left with single spaces.
+func boxText(box []string) string {
+	content := make([]string, 0, len(box))
+
+	for _, line := range box {
+		line = strings.TrimSpace(line)
+		_, size := utf8.DecodeRuneInString(line)
+		if line = strings.TrimSpace(line[size:]); line != "" {
+			content = append(content, line)
+		}
+	}
+	if len(content) == 0 {
+		return ""
+	}
+
+	return strings.Join(content[:len(content)-1], " ")
+}
+
+// rulesInput finds pi's composer: the non-empty lines between the
+// last two horizontal rules. found reports that two rules exist.
+func rulesInput(lines []string) (string, bool) {
+	last, prev := -1, -1
+
+	for i := len(lines) - 1; i >= 0 && prev < 0; i-- {
+		if !isRule(lines[i]) {
+			continue
+		}
+		if last < 0 {
+			last = i
+
+			continue
+		}
+		prev = i
+	}
+	if prev < 0 {
+		return "", false
+	}
+
+	content := make([]string, 0, last-prev)
+	for _, line := range lines[prev+1 : last] {
+		if line = strings.TrimSpace(line); line != "" {
+			content = append(content, line)
+		}
+	}
+
+	return strings.Join(content, " "), true
+}
+
+// isRule reports whether a line is one of pi's horizontal rules:
+// minRule or more rule runes, trimmed, and nothing else.
+func isRule(line string) bool {
+	count := 0
+
+	for _, r := range strings.TrimSpace(line) {
+		if r != ruleRune {
+			return false
+		}
+		count++
+	}
+
+	return count >= minRule
+}
+
+// firstRune returns a line's first non-space rune, or 0 when the line
+// holds nothing else.
+func firstRune(line string) rune {
+	for _, r := range line {
+		if !unicode.IsSpace(r) {
+			return r
+		}
+	}
+
+	return 0
 }
