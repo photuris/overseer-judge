@@ -625,6 +625,42 @@ func TestReviewRequestParity(t *testing.T) {
 	}
 }
 
+// TestReviewZeroItemsNeedsNoKey is R5-02: a round with no items must
+// print nothing and exit 0, without reaching for a credential.
+func TestReviewZeroItemsNeedsNoKey(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(
+		func(http.ResponseWriter, *http.Request) {
+			t.Error("a zero-item round made a request")
+		},
+	))
+	defer srv.Close()
+
+	for _, tt := range []struct {
+		name, stdin string
+	}{
+		{"empty", ""},
+		{"no items", "# Round 7\n\nNone.\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			noKey(t)
+			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			t.Setenv("TYPESAFE_BASE_URL", srv.URL)
+
+			got := invoke(t, tt.stdin, "review", "-")
+			if got.code != 0 {
+				t.Errorf("code = %d, want 0 (stderr %s)",
+					got.code, got.stderr)
+			}
+			if got.stdout != "" {
+				t.Errorf("stdout = %q, want empty", got.stdout)
+			}
+			if got.stderr != "" {
+				t.Errorf("stderr = %q, want empty", got.stderr)
+			}
+		})
+	}
+}
+
 func TestReviewRejectsPretty(t *testing.T) {
 	noKey(t)
 

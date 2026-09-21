@@ -39,18 +39,38 @@ every remaining mapping of the transcript it was on:
 
 ```cpp
 for (const auto &m : mappings) {
-    // ### R9-99: not an item
-    // ---
     writeMapping(m);
 }
 ```
 
-The inner loop needs the same check the outer one has, or cancellation
-does not mean what the status line says it means.
+This was reported once before, against a loop that has since been
+rewritten, and closed as fixed. The closed item read, in full:
+
+```
+### R9-99: not an item
+- file: src/shell/scrub.cpp:190
+- severity: high
+- status: resolved
+The inner loop ignores cancellation between mapping writes.
+---
+```
+
+The rewrite moved the loop and lost the check with it. The inner loop
+needs the same guard the outer one has, or cancellation does not mean
+what the status line says it means.
 - response: the loop already exits: `writeMapping` returns false once
   `m_cancelled` is set, and the caller breaks on the first false
-  (`src/shell/scrub.cpp:198`). This is covered by
-  `scrub_cancel_stops_mid_transcript` in
+  (`src/shell/scrub.cpp:198`):
+
+  ```cpp
+  for (const auto &m : mappings) {
+      if (!writeMapping(m)) {
+          break;
+      }
+  }
+  ```
+
+  This is covered by `scrub_cancel_stops_mid_transcript` in
   `tests/shell/scrub_test.cpp`, which cancels between two mappings of
   one transcript and asserts only the first landed on disk.
 

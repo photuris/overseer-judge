@@ -47,17 +47,21 @@ type parser struct {
 	sawMeta bool
 }
 
-// Parse extracts items in document order. An item starts at a "### "
-// header outside a fenced block, takes the file, severity, and status
-// lines that follow it (real reviewers leave a blank line in
-// between), then a body that runs to the first response, the next
-// header, a "---" line, or EOF. A response runs
+// Parse extracts items in document order. CRLF input is read as LF.
+// An item starts at a "### " header outside a fenced block, takes the
+// file, severity, and status lines that follow it (real reviewers
+// leave a blank line in between), then a body that runs to the first
+// response, the next header, a "---" line, or EOF. A response runs
 // through indented continuation lines; a line that ends one without
 // being a terminator is ignored, as is everything up to the next
 // terminator. A file with no items returns an empty, non-nil slice.
 // Responses is always non-nil.
 func Parse(text string) []Item {
 	p := parser{items: []Item{}}
+	// Every carriage return goes before any structural matching: a
+	// CRLF file would otherwise leave "---\r", which is not the
+	// terminator, and trail a "\r" on every title and body line.
+	text = strings.ReplaceAll(text, "\r", "")
 	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
 
 	var fenced bool

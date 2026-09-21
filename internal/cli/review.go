@@ -81,6 +81,12 @@ func runReview(
 	g.log.Debug("parsed review round", "file", args[0],
 		"items", len(items))
 
+	// Nothing to judge: print nothing and exit 0 without reaching for
+	// a credential that a round with no items does not need.
+	if len(items) == 0 {
+		return nil
+	}
+
 	if g.dryRun {
 		return writeReviewDryRun(stdout, g, items)
 	}

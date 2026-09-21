@@ -10,6 +10,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -84,9 +86,22 @@ func TestParseRoundOne(t *testing.T) {
 		}
 	}
 
-	if !strings.Contains(items[2].Body, "### R9-99") {
-		t.Errorf("R6-03 body lost its fenced fake header: %q",
-			items[2].Body)
+	// R6-03's fence holds a real header line and a real terminator,
+	// both unprefixed: without fence handling the item would split in
+	// two and its body would stop at the "---".
+	bodyLines := strings.Split(items[2].Body, "\n")
+	for _, want := range []string{"### R9-99: not an item", "---"} {
+		if !slices.Contains(bodyLines, want) {
+			t.Errorf("R6-03 body lost the fenced line %q:\n%s",
+				want, items[2].Body)
+		}
+	}
+	// The response quotes an indented fenced snippet, which must not
+	// toggle the fence flag and must stay inside the response.
+	if !strings.Contains(items[2].Responses[0], "```cpp") ||
+		!strings.Contains(items[2].Responses[0], "break;") {
+		t.Errorf("R6-03 response lost its indented snippet: %q",
+			items[2].Responses[0])
 	}
 
 	if strings.Contains(items[5].Responses[1], "overseer note") {
@@ -201,6 +216,50 @@ func TestParseBlankLinesInMetadata(t *testing.T) {
 	if it.Body != "- status: open\nbody" {
 		t.Errorf("body = %q, want the closed-off line and the text",
 			it.Body)
+	}
+}
+
+// TestParseCRLFMatchesLF is R5-01: a CRLF file must parse exactly as
+// the same file with LF endings. The repro is the reviewer's: a
+// separator followed by a response that belongs to no item.
+func TestParseCRLFMatchesLF(t *testing.T) {
+	const lf = "### R1-01: t\nbody\n---\n- response: outside\n"
+	crlf := strings.ReplaceAll(lf, "\n", "\r\n")
+
+	want := Parse(lf)
+	if len(want) != 1 {
+		t.Fatalf("LF input gave %d items, want 1", len(want))
+	}
+	if want[0].Title != "t" || want[0].Body != "body" ||
+		len(want[0].Responses) != 0 {
+		t.Fatalf("LF item is %+v, want the response left outside",
+			want[0])
+	}
+
+	got := Parse(crlf)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("CRLF input parsed differently:\n got %+v\nwant %+v",
+			got, want)
+	}
+}
+
+// TestParseCRLFFixture is the same rule over a whole fixture: the
+// carriage returns must not reach titles, metadata, bodies, or
+// responses.
+func TestParseCRLFFixture(t *testing.T) {
+	text := fixture(t, "round-01.md")
+
+	got := Parse(strings.ReplaceAll(text, "\n", "\r\n"))
+	if !reflect.DeepEqual(got, Parse(text)) {
+		t.Error("round-01.md parses differently with CRLF endings")
+	}
+	for _, it := range got {
+		if strings.Contains(it.Title+it.File+it.Severity+
+			it.Status+it.Body+strings.Join(it.Responses, ""),
+			"\r",
+		) {
+			t.Errorf("%s kept a carriage return: %+v", it.ID, it)
+		}
 	}
 }
 
