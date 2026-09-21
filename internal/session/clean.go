@@ -328,17 +328,21 @@ func capBytes(lines []string, maxBytes int) string {
 const inputMarkers = "❯›"
 
 // The runes opencode draws its composer box with: a bar down the left
-// edge of every line, and a foot under the last one.
+// edge of every line, a foot under the last one, and a cap that runs
+// from the foot to the right edge of the box.
 const (
 	boxBar  = '┃'
 	boxFoot = '╹'
+	boxCap  = '▀'
 )
 
-// ruleRune is the glyph pi draws its horizontal rules with, and
-// minRule is how many of them a line needs to count as one.
+// ruleRune is the glyph pi draws its horizontal rules with, minRule
+// is how many of them a line must end with to count as one, and
+// maxLabel is how many other runes a labelled rule may carry.
 const (
 	ruleRune = '─'
 	minRule  = 20
+	maxLabel = 24
 )
 
 // menuOption matches a dialog menu option sitting under the cursor,
@@ -453,23 +457,56 @@ func boxInput(lines []string) (string, bool) {
 			continue
 		}
 
-		return boxText(lines[top:i]), true
+		lo, hi := boxEdges(lines[i])
+
+		return boxText(lines[top:i], lo, hi), true
 	}
 
 	return "", false
 }
 
-// boxText strips the bar from every line of a composer box, drops the
-// blank lines and the status line that follows them, and joins what
-// is left with single spaces.
-func boxText(box []string) string {
+// boxEdges returns the rune index of the foot in a closer line and
+// the rune index of the last cap rune after it. Those are the left
+// and right edges of the box; anything further right on a box line
+// belongs to whatever the agent drew beside it. A closer carrying no
+// cap runes clips to its own last rune.
+func boxEdges(closer string) (lo, hi int) {
+	runes := []rune(closer)
+	hi = len(runes) - 1
+
+	for i, r := range runes {
+		switch r {
+		case boxFoot:
+			lo = i
+		case boxCap:
+			hi = i
+		}
+	}
+
+	return lo, hi
+}
+
+// boxText takes the runes between the box's edges out of every line
+// of a composer box, drops the blank ones and the status line that
+// follows them, and joins what is left with single spaces.
+func boxText(box []string, lo, hi int) string {
 	content := make([]string, 0, len(box))
 
 	for _, line := range box {
-		line = strings.TrimSpace(line)
-		_, size := utf8.DecodeRuneInString(line)
-		if line = strings.TrimSpace(line[size:]); line != "" {
-			content = append(content, line)
+		// ponytail: rune indices, not display columns; double-width
+		// input would shift the clip. Switch to a width-aware walk if
+		// that bites.
+		runes := []rune(line)
+		if len(runes) > hi+1 {
+			runes = runes[:hi+1]
+		}
+		if lo+1 >= len(runes) {
+			continue
+		}
+		if text := strings.TrimSpace(
+			string(runes[lo+1:]),
+		); text != "" {
+			content = append(content, text)
 		}
 	}
 	if len(content) == 0 {
@@ -509,19 +546,39 @@ func rulesInput(lines []string) (string, bool) {
 	return strings.Join(content, " "), true
 }
 
-// isRule reports whether a line is one of pi's horizontal rules:
-// minRule or more rule runes, trimmed, and nothing else.
+// isRule reports whether a line is one of pi's horizontal rules: a
+// trimmed line that opens with at least two rule runes and closes
+// with at least minRule of them. Between the two runs pi may draw a
+// short label, as in "── Working ───…", so up to maxLabel further
+// runes are allowed, all of them letters, digits, or spaces. A line
+// of nothing but rule runes still qualifies.
 func isRule(line string) bool {
-	count := 0
-
-	for _, r := range strings.TrimSpace(line) {
-		if r != ruleRune {
-			return false
-		}
-		count++
+	runes := []rune(strings.TrimSpace(line))
+	if len(runes) < minRule ||
+		runes[0] != ruleRune || runes[1] != ruleRune {
+		return false
 	}
 
-	return count >= minRule
+	tail := 0
+	for i := len(runes) - 1; i >= 0 && runes[i] == ruleRune; i-- {
+		tail++
+	}
+	if tail < minRule {
+		return false
+	}
+
+	label := 0
+	for _, r := range runes {
+		if r == ruleRune {
+			continue
+		}
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != ' ' {
+			return false
+		}
+		label++
+	}
+
+	return label <= maxLabel
 }
 
 // firstRune returns a line's first non-space rune, or 0 when the line

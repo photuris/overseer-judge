@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"overseer-judge/internal/jev"
 )
@@ -128,14 +129,41 @@ func TestCleanGhostSuggestionFixture(t *testing.T) {
 	}
 }
 
-// composer builds an opencode box: bar lines followed by the foot.
+// composer builds an opencode box: bar lines followed by a closer
+// whose cap reaches past the longest of them.
 func composer(lines ...string) string {
+	width := 0
+	for _, line := range lines {
+		if n := utf8.RuneCountInString(line); n > width {
+			width = n
+		}
+	}
+
+	return boxedAt(width+2, lines...)
+}
+
+// boxInner is how many runes of a boxedAt line fall inside a box
+// whose cap is boxInner+2 runes wide.
+const boxInner = 30
+
+// beside pads text out to the box's inner width and draws side text
+// past its right edge, the way opencode draws its file sidebar.
+func beside(text, side string) string {
+	pad := boxInner - utf8.RuneCountInString(text)
+
+	return text + strings.Repeat(" ", pad) + side
+}
+
+// boxedAt builds an opencode box whose cap stops capWidth runes past
+// the foot, so a caller can draw a sidebar past the box's right edge.
+func boxedAt(capWidth int, lines ...string) string {
 	out := make([]string, 0, len(lines)+1)
 	for _, line := range lines {
 		out = append(out, "  ┃  "+line)
 	}
+	closer := "  ╹" + strings.Repeat("▀", capWidth)
 
-	return strings.Join(append(out, "  ╹▀▀▀▀"), "\n")
+	return strings.Join(append(out, closer), "\n")
 }
 
 // rule is a pi composer rule, and shortRule is one rune too short to
@@ -144,6 +172,11 @@ var (
 	rule      = strings.Repeat("─", minRule)
 	shortRule = strings.Repeat("─", minRule-1)
 )
+
+// labelled builds one of pi's labelled rules, as in "── Working ──…".
+func labelled(label string) string {
+	return "── " + label + " " + rule
+}
 
 func TestInputLine(t *testing.T) {
 	tests := []struct {
@@ -195,6 +228,29 @@ func TestInputLine(t *testing.T) {
 			cleaned: "  ┃  quoted reply\n  ┃  more reply",
 			want:    "",
 		},
+		{
+			name: "a sidebar past the cap is not input",
+			kind: "opencode",
+			cleaned: boxedAt(boxInner+2,
+				beside("typed here", "/tmp/claude-1000/-home-"),
+				beside("", "joshua-Projects-agent-skills/"),
+				beside("Build · medium", "23edc16b-74db-4b4f"),
+			),
+			want: "typed here",
+		},
+		{
+			name:    "a box line shorter than the cap keeps what it has",
+			kind:    "opencode",
+			cleaned: boxedAt(60, "short", "status"),
+			want:    "short",
+		},
+		{
+			name: "a closer with no cap clips to its own length",
+			kind: "opencode",
+			cleaned: "  ┃  typed here is long\n  ┃  status\n  ╹" +
+				strings.Repeat("▔", 10),
+			want: "typed he",
+		},
 
 		// rules
 		{
@@ -226,6 +282,19 @@ func TestInputLine(t *testing.T) {
 			kind:    "pi",
 			cleaned: Clean(rule+"\r\ntyped\r\n"+rule, 0, 0),
 			want:    "typed",
+		},
+		{
+			name:    "a labelled rule is a rule",
+			kind:    "pi",
+			cleaned: labelled(" Working") + "\ntyped\n" + rule,
+			want:    "typed",
+		},
+		{
+			name: "an empty composer under a labelled rule",
+			kind: "pi",
+			cleaned: rule + "\nstreamed output\n" +
+				labelled(" Working") + "\n" + rule,
+			want: "",
 		},
 
 		// strategy selection
@@ -301,6 +370,39 @@ func TestInputLine(t *testing.T) {
 	}
 }
 
+// TestIsRule pins the shape of pi's horizontal rules, labelled ones
+// included: pi draws its composer's top rule as "── Working ───…"
+// while it works.
+func TestIsRule(t *testing.T) {
+	tests := []struct {
+		name, line string
+		want       bool
+	}{
+		{"a plain rule", rule, true},
+		{"a labelled rule", labelled(" Working"), true},
+		{
+			name: "a label that is too long",
+			line: labelled(
+				"a label that is far too long to be a rule label",
+			),
+			want: false,
+		},
+		{"a label with punctuation", labelled(" Work/ing"), false},
+		{"a short tail", "──  Working " + shortRule, false},
+		{"a short rule", shortRule, false},
+		{"not a rule at all", "typed text", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isRule(tt.line); got != tt.want {
+				t.Errorf("isRule(%q) = %v, want %v",
+					tt.line, got, tt.want)
+			}
+		})
+	}
+}
+
 // fixtureInputLines is what every fixture's input box holds. Each is
 // listed under the agent that drew it and under unknown, which must
 // reach the same answer without being told.
@@ -316,23 +418,33 @@ var fixtureInputLines = map[string]string{
 	"idle-03.txt":        "",
 	"idle-04.txt":        "",
 	"idle-05.txt":        "",
+	"idle-06.txt":        "",
+	"idle-07.txt":        "",
 	"unsubmitted-01.txt": "go ahead and stub resources/tmux.md",
 	"unsubmitted-02.txt": "take option 2, and add a test that the " +
 		"cooked path has no escapes",
 	"unsubmitted-03.txt": "refactor the parser to use a state table",
 	"unsubmitted-04.txt": "add a regression test for the empty case",
+	"unsubmitted-05.txt": "now add a unit test for greet",
 	"working-01.txt":     "",
 	"working-02.txt":     "",
+	"working-03.txt":     "",
+	"working-04.txt":     "",
 }
 
-// fixtureAgents names the agent that drew each of the captures this
-// task added. The rest are Claude Code and Codex captures, already
-// covered by the unknown pass.
+// fixtureAgents names the agent that drew each capture that is not
+// Claude Code's or Codex's. Those two are already covered by the
+// unknown pass.
 var fixtureAgents = map[string]string{
 	"idle-04.txt":        "opencode",
+	"idle-06.txt":        "opencode",
 	"unsubmitted-03.txt": "opencode",
+	"unsubmitted-05.txt": "opencode",
+	"working-03.txt":     "opencode",
 	"idle-05.txt":        "pi",
+	"idle-07.txt":        "pi",
 	"unsubmitted-04.txt": "pi",
+	"working-04.txt":     "pi",
 }
 
 func TestInputLineOnFixtures(t *testing.T) {

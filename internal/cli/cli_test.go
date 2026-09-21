@@ -516,6 +516,13 @@ func TestSessionRequestParity(t *testing.T) {
 			wantInput: "refactor the parser to use a state table",
 		},
 		{kind: "opencode", fixture: "idle-04.txt", wantInput: ""},
+		{
+			kind:      "opencode",
+			fixture:   "unsubmitted-05.txt",
+			wantInput: "now add a unit test for greet",
+		},
+		{kind: "opencode", fixture: "idle-06.txt", wantInput: ""},
+		{kind: "pi", fixture: "working-04.txt", wantInput: ""},
 	}
 
 	for _, tt := range tests {
