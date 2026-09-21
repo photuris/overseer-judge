@@ -28,6 +28,10 @@ type Doc struct {
 // fenced mode, and inside a fence no line is a heading, an H1, or a
 // status line. A repeated "## " heading does not open a section: its
 // line and the lines after it stay with the section it interrupts.
+// Only the first non-empty line after the H1 can carry the status,
+// whatever else that line turns out to be: a heading or a fence
+// there leaves Status empty rather than passing the search on to a
+// later line.
 func Parse(text string) Doc {
 	d := Doc{Sections: map[string]string{}}
 
@@ -48,6 +52,13 @@ func Parse(text string) Doc {
 	for _, line := range strings.Split(
 		strings.TrimSuffix(text, "\n"), "\n",
 	) {
+		if afterTitle && strings.TrimSpace(line) != "" {
+			afterTitle = false
+			if m := statusRe.FindStringSubmatch(line); m != nil {
+				d.Status = m[1]
+			}
+		}
+
 		switch {
 		case strings.HasPrefix(line, "```"):
 			fenced = !fenced
@@ -63,11 +74,6 @@ func Parse(text string) Doc {
 			afterTitle = true
 
 			continue
-		case afterTitle && strings.TrimSpace(line) != "":
-			afterTitle = false
-			if m := statusRe.FindStringSubmatch(line); m != nil {
-				d.Status = m[1]
-			}
 		}
 
 		if section != "" {

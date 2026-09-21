@@ -98,6 +98,78 @@ Allowed: b.go
 	}
 }
 
+// TestStatusIsOnlyReadFromTheLineBelowTheTitle pins R4-01: the first
+// non-empty line after the H1 is the only status candidate, so a
+// header without one cannot borrow a Status: line out of a section
+// body and pass status_line with it.
+func TestStatusIsOnlyReadFromTheLineBelowTheTitle(t *testing.T) {
+	tests := []struct {
+		name, text, section, body string
+	}{
+		{
+			name:    "heading first",
+			text:    "# test\n## Objective\nStatus: ready\n",
+			section: "Objective",
+			body:    "Status: ready\n",
+		},
+		{
+			name:    "files heading first",
+			text:    "# test\n## Files\nStatus: done\n",
+			section: "Files",
+			body:    "Status: done\n",
+		},
+		{
+			name: "fence first",
+			text: "# test\n```\nStatus: ready\n```\n" +
+				"## Objective\nwork\n",
+			section: "Objective",
+			body:    "work\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := Parse(tt.text)
+
+			if d.Title != "test" {
+				t.Errorf("Title = %q, want test", d.Title)
+			}
+			if d.Status != "" {
+				t.Errorf("Status = %q, want empty: the line below "+
+					"the H1 is not a status line", d.Status)
+			}
+			if got := d.Section(tt.section); got != tt.body {
+				t.Errorf("%s body = %q, want %q",
+					tt.section, got, tt.body)
+			}
+
+			finding := Static(d)[0]
+			if finding.Check != "status_line" || finding.OK {
+				t.Errorf("first finding = %+v, want status_line "+
+					"failing", finding)
+			}
+		})
+	}
+}
+
+// TestStatusIsReadFromTheLineBelowTheTitle is the other half of
+// R4-01: a real status line is still found, blank lines and all.
+func TestStatusIsReadFromTheLineBelowTheTitle(t *testing.T) {
+	for _, text := range []string{
+		"# test\nStatus: ready\n## Objective\nwork\n",
+		"# test\n\n\nStatus: ready\n\n## Objective\nwork\n",
+	} {
+		d := Parse(text)
+		if d.Status != "ready" {
+			t.Errorf("Status = %q, want ready, from %q",
+				d.Status, text)
+		}
+		if finding := Static(d)[0]; !finding.OK {
+			t.Errorf("status_line = %+v, want OK", finding)
+		}
+	}
+}
+
 func TestSectionAbsentIsEmpty(t *testing.T) {
 	d := Parse(fixture(t, "vague-01.md"))
 	if got := d.Section("Spec"); got != "" {
