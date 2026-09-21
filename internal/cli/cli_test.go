@@ -98,6 +98,8 @@ func TestHelpSnapshots(t *testing.T) {
 	}{
 		{"top level", []string{"--help"}, "help.txt"},
 		{"verb", []string{"raw", "--help"}, "help-raw.txt"},
+		{"session verb", []string{"session", "--help"},
+			"help-session.txt"},
 	}
 
 	for _, tt := range tests {

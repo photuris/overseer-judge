@@ -1,0 +1,44 @@
+● The driver interface is the right seam. Panes, Read, Send, and
+  Submit are all tmux can do without a Herdr server running, and
+  everything above the interface stays untouched.
+
+● Read(internal/driver/registry.go)
+  ⎿  Read 61 lines (ctrl+o to expand)
+
+● Two things worth deciding before I write any of it:
+
+  1. Whether the tmux driver shells out to the tmux binary or
+     speaks the control-mode protocol on a socket. Shelling out is
+     a dozen lines and survives a tmux upgrade; control mode is
+     faster but is a parser we would own forever.
+
+  2. Whether `Read` returns the cooked pane or the escapes. The
+     classifier wants the escapes, so I would rather return them
+     and let callers strip.
+
+  My recommendation is the shell-out and the raw escapes. That
+  gives us a real second driver behind the interface, which is the
+  only way to find out whether the abstraction holds. If the
+  latency shows up in practice we can swap the body of one method
+  for control mode without touching a caller.
+
+  I can sketch the doc first if you would rather review the shape
+  before the code: resources/tmux.md, half a page, the four
+  methods and the capture flags.
+
+  I did not touch the Herdr driver. Adding the second driver is
+  the test of the abstraction; rewriting the first one at the same
+  time would hide which change broke what.
+
+  Want me to start with the doc, or go straight to the driver? I
+  would lean toward the doc, since it is cheaper to argue with.
+
+  Next time, drop a line in AGENTS.md about preferring
+  a tmux driver to validate the abstraction.
+  (disable recaps in /config)
+        new task? /clear to save 129.1k tokens
+────────────────────────────────────────────────
+❯ go ahead and stub resources/tmux.md
+────────────────────────────────────────────────
+
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← fo…

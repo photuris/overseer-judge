@@ -1,0 +1,29 @@
+>_ OpenAI Codex (v0.58.0)
+
+  Loading configuration from ~/.codex/config.toml
+  Using profile: default
+  Model: gpt-6-astra (reasoning: medium)
+  Sandbox: workspace-write
+  Approval: on-request
+
+  MCP servers:
+    qmd-personal   http://192.168.1.241:8181/mcp   ok
+    qmd-work       http://192.168.1.203:8181/mcp   ok
+
+  Session id: 019a4c2e-7f13-7b90-9d55-3c81a6f0e412
+  Logs: ~/.codex/log/codex-tui.log
+
+  To get started, describe a task or try one of these commands:
+    /init - create an AGENTS.md file
+    /status - show current session configuration
+    /approvals - choose what Codex can do without approval
+
+> You are in /home/joshua/Projects/personal/over
+  Do you trust the contents of this directory?
+  Working with untrusted contents comes with
+  higher risk of prompt injection. Trusting the
+  directory allows project-local config, hooks,
+  and exec policies to load.
+› 1. Yes, continue
+  2. No, quit
+  Press enter to continue

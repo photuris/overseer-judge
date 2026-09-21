@@ -1,0 +1,28 @@
+• Edited src/session/tail.rs (+18 -4)
+
+• Added tests for the faint-span pass.
+
+• Ran cargo test --workspace --quiet
+  └ running 45 tests
+    test result: ok. 45 passed; 0 failed; 0 ignored
+
+  Done. `clean` now drops faint spans before stripping the rest of
+  the escapes, so a greyed-out suggestion never reaches the
+  classifier.
+
+  Files changed:
+    src/session/tail.rs    +18 -4
+    src/session/tests.rs   +31 -0
+    src/cli/agent.rs        +9 -1
+
+  Next step, if you want it: thread the `--format ansi` flag
+  through `herdr agent read` so the capture keeps its escapes end
+  to end.
+
+  Note: your default model is `gpt-5.6-
+  sol` but is resuming with `gpt-6-astra`.
+  Consider switching back to `gpt-5.6-sol` as it
+  may affect Codex performance.
+
+› Ask Codex to do anything
+  gpt-6-astra medium · ~/Projects/personal/herd…

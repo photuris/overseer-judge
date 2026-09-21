@@ -1,0 +1,21 @@
+● Bash(go test ./internal/jev/ -count=1 -run TestTruncated)
+  ⎿  ok  	overseer-judge/internal/jev	0.028s
+
+● That closes the round-2 finding. A body that ends early now
+  surfaces as a NetworkError, so the CLI exits 8 and the caller
+  can retry instead of treating the response as malformed.
+
+  Changed:
+  - internal/jev/jev.go:262   isReadFailure recognises net.Error
+    and both context errors.
+  - internal/jev/jev.go:301   bodyError consults ctx.Err() before
+    it classifies anything.
+  - internal/jev/jev_test.go  a server that writes half a body and
+    then closes the connection.
+
+  gofmt, go vet, and go test ./... are clean on the whole module.
+
+────────────────────────────────────────────────
+❯ [0m[2mtreat truncated bodies as transport failure too[0m
+────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for history

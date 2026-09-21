@@ -27,6 +27,7 @@ overseer-judge <verb> [flags] [args]
 overseer-judge --help | --version
 
   raw      send an arbitrary Jev request read from --input
+  session  classify an agent pane's transcript tail read from --input
 ```
 
 All flags follow the verb. Every verb accepts `--pretty`, `--dry-run`,
@@ -43,6 +44,50 @@ without a network call. This is how you read the question wording:
 ```sh
 overseer-judge raw --dry-run --input req.json | jq .body.questions
 ```
+
+### `session`
+
+`session` reads the tail of a coding agent's terminal pane and says
+what the pane is doing: `working`, `idle`, `dialog`, `unsubmitted`,
+`error`, or `degraded`. The verdict carries the label, its confidence,
+the full probability distribution, and a separate `coherent`
+probability that a watcher can threshold on its own.
+
+```sh
+herdr agent read <pane> --lines 60 --source recent-unwrapped \
+  --format ansi | overseer-judge session --input - --agent claude
+```
+
+stdout is one compact JSON object; `--pretty` indents it:
+
+```json
+{
+  "state": "idle",
+  "confidence": 0.88,
+  "probabilities": {
+    "idle": 0.88,
+    "unsubmitted": 0.07,
+    "working": 0.03,
+    "dialog": 0.01,
+    "error": 0.01,
+    "degraded": 0.0
+  },
+  "coherent": 0.97,
+  "model": "jev-latest",
+  "usage": {"input_tokens": 1183, "output_tokens": 9}
+}
+```
+
+`--agent` takes `claude`, `codex`, or `unknown` (the default) and is
+passed to the model as context.
+
+**Feed it ANSI, not plain text.** Only ANSI input lets the tool drop an
+agent's greyed-out prompt suggestion, which Claude Code renders as
+faint text on the composer line. In plain text that suggestion is
+indistinguishable from input the user typed and has not submitted, so
+an idle pane reads as `unsubmitted`. Before sending, the tool removes
+faint spans, strips the remaining escapes and spinner glyphs, collapses
+blank runs, and caps the tail at the last 200 lines and 12000 bytes.
 
 ## Configuration
 

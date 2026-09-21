@@ -1,0 +1,31 @@
+● Bash(go test ./... -count=1)
+  ⎿  ok  	overseer-judge/internal/cli	0.102s
+     ok  	overseer-judge/internal/config	0.004s
+     ok  	overseer-judge/internal/jev	0.029s
+
+● Tests are green. Now the README section for the session verb,
+  then I will regenerate the help snapshot.
+
+● Read(README.md)
+  ⎿  Read 168 lines (ctrl+o to expand)
+
+● API Error: 529 {"type":"error","error":{"type":"overloaded_error",
+  "message":"Overloaded"}}
+  Retrying in 1 seconds… (attempt 1/3)
+
+  API Error: 529 {"type":"error","error":{"type":"overloaded_error",
+  "message":"Overloaded"}}
+  Retrying in 2 seconds… (attempt 2/3)
+
+  API Error: 529 {"type":"error","error":{"type":"overloaded_error",
+  "message":"Overloaded"}}
+  Retrying in 4 seconds… (attempt 3/3)
+
+  API Error (529 Overloaded) · The request failed after 3
+  attempts and was not completed. Nothing was written.
+
+────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────
+
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for history

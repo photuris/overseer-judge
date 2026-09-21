@@ -1,0 +1,39 @@
+• Ran go run ./cmd/herdr serve --config ./herdr.toml
+  └ time=2026-09-21T14:02:11.884Z level=INFO msg="loading config"
+      path=./herdr.toml
+    time=2026-09-21T14:02:11.891Z level=INFO msg="driver registered"
+      name=tmux
+    time=2026-09-21T14:02:11.892Z level=INFO msg="listening"
+      addr=127.0.0.1:7781
+    panic: runtime error: invalid memory address or nil pointer
+    dereference
+    [signal SIGSEGV: segmentation violation code=0x1 addr=0x0
+    pc=0x6f31ac]
+
+    goroutine 41 [running]:
+    herdr/internal/driver.(*Tmux).capturePane(0x0, {0xc0000b2018, 0x7},
+    0x3c)
+    	/home/joshua/Projects/personal/herdr/internal/driver/tmux.go:58
+    	+0x2c
+    herdr/internal/driver.(*Tmux).Read(0x0, {0xc0000b2018, 0x7}, 0x3c)
+    	/home/joshua/Projects/personal/herdr/internal/driver/tmux.go:91
+    	+0x45
+    herdr/internal/server.(*Server).handleRead(0xc0000d2000,
+    {0x8a1e40, 0xc0001260e0}, 0xc000132000)
+    	/home/joshua/Projects/personal/herdr/internal/server/read.go:37
+    	+0x118
+    net/http.HandlerFunc.ServeHTTP(0xc0001240a0, {0x8a1e40,
+    0xc0001260e0}, 0xc000132000)
+    	/usr/lib/go/src/net/http/server.go:2294 +0x29
+    net/http.(*ServeMux).ServeHTTP(0xc00011e000, {0x8a1e40,
+    0xc0001260e0}, 0xc000132000)
+    	/usr/lib/go/src/net/http/server.go:2822 +0x1ec
+    net/http.serverHandler.ServeHTTP({0xc000126000}, {0x8a1e40,
+    0xc0001260e0}, 0xc000132000)
+    	/usr/lib/go/src/net/http/server.go:3301 +0x8e
+    created by net/http.(*Server).Serve in goroutine 1
+    	/usr/lib/go/src/net/http/server.go:3454 +0x485
+    exit status 2
+
+joshua@omarchy ~/Projects/personal/herdr (main)
+$
