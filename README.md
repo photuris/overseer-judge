@@ -28,6 +28,7 @@ overseer-judge --help | --version
 
   raw      send an arbitrary Jev request read from --input
   session  classify an agent pane's transcript tail read from --input
+  task     lint an overseer task file for spec defects
 ```
 
 All flags follow the verb. Every verb accepts `--pretty`, `--dry-run`,
@@ -96,6 +97,56 @@ indistinguishable from input the user typed and has not submitted, so
 an idle pane reads as `unsubmitted`. Before sending, the tool removes
 faint spans, strips the remaining escapes and spinner glyphs, collapses
 blank runs, and caps the tail at the last 200 lines and 12000 bytes.
+
+### `task`
+
+The overseer writes a task file per unit of work, and an implementer
+executes it literally. `task` reads one and reports the defects that
+would send the implementer guessing.
+
+```sh
+overseer-judge task --pretty .overseer/tasks/003-tasklint.md
+```
+
+The path is positional and comes after the flags: flag parsing stops
+at the first non-flag argument. `-` reads the file from stdin.
+
+Six structural checks run in code, always in the same order and always
+all six: `status_line`, `sections_present`, `sections_ordered`,
+`allowed_nonempty`, `acceptance_command`, `budget_numeric`. They are
+fence-aware, so a template quoted inside a fenced code block cannot
+satisfy or break a check. Three judgments come from the model, each a
+probability: `needs_interpretation` (the spec leaves design decisions
+to the implementer), `acceptance_vacuous` (the `Expect:` lines would
+pass on broken work), and `scope_generic` (`Out of scope` names no
+concrete adjacent work).
+
+```json
+{
+  "file": ".overseer/tasks/003-tasklint.md",
+  "static": [
+    {"check": "status_line", "ok": true},
+    {"check": "sections_present", "ok": false,
+     "detail": "Acceptance, Rules"},
+    {"check": "sections_ordered", "ok": true},
+    {"check": "allowed_nonempty", "ok": true},
+    {"check": "acceptance_command", "ok": true},
+    {"check": "budget_numeric", "ok": true}
+  ],
+  "judgments": {
+    "needs_interpretation": 0.07,
+    "acceptance_vacuous": 0.11,
+    "scope_generic": 0.04
+  },
+  "model": "jev-latest",
+  "usage": {"input_tokens": 1412, "output_tokens": 12}
+}
+```
+
+A file missing its `## Objective` or `## Acceptance` section gives the
+model nothing to judge, so no request is made: the report carries the
+static findings alone, `judgments` and `model` are absent, and
+`--dry-run` prints `{"method":"","path":"","body":null,"static":[…]}`.
 
 ## Configuration
 

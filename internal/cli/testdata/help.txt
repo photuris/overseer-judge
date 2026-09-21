@@ -7,6 +7,7 @@ via TypeSafe's System One (Jev) API.
 Verbs:
   raw      send an arbitrary Jev request read from --input
   session  classify an agent pane's transcript tail read from --input
+  task     lint an overseer task file for spec defects
 
 All flags follow the verb. Every verb accepts these
 global flags:

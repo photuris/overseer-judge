@@ -102,6 +102,7 @@ func TestHelpSnapshots(t *testing.T) {
 		{"verb", []string{"raw", "--help"}, "help-raw.txt"},
 		{"session verb", []string{"session", "--help"},
 			"help-session.txt"},
+		{"task verb", []string{"task", "--help"}, "help-task.txt"},
 	}
 
 	for _, tt := range tests {
@@ -473,6 +474,60 @@ func TestSessionRequestParity(t *testing.T) {
 	}
 
 	dry := invoke(t, "", append(args, "--dry-run")...)
+	if dry.code != 0 {
+		t.Fatalf("dry-run code = %d, stderr = %s",
+			dry.code, dry.stderr)
+	}
+	if body := dryRunBody(t, dry.stdout)["body"]; !reflect.DeepEqual(
+		body, sent,
+	) {
+		t.Errorf("--dry-run body differs from the request sent:"+
+			"\n dry %v\nsent %v", body, sent)
+	}
+}
+
+// taskAnswers is the body the task parity server returns.
+const taskAnswers = `{"model":"jev-1","answers":{` +
+	`"needs_interpretation":{"type":"noul","noul":0.07},` +
+	`"acceptance_vacuous":{"type":"noul","noul":0.11},` +
+	`"scope_generic":{"type":"noul","noul":0.04}},` +
+	`"usage":{"input_tokens":1400,"output_tokens":9}}`
+
+func TestTaskRequestParity(t *testing.T) {
+	path := filepath.Join(
+		"..", "tasklint", "testdata", "good-01.md",
+	)
+
+	var sent map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewDecoder(r.Body).Decode(&sent)
+			_, _ = io.WriteString(w, taskAnswers)
+		},
+	))
+	defer srv.Close()
+
+	withKey(t, "sekret")
+	t.Setenv("TYPESAFE_BASE_URL", srv.URL)
+
+	got := invoke(t, "", "task", "--model", "m9", path)
+	if got.code != 0 {
+		t.Fatalf("code = %d, stderr = %s", got.code, got.stderr)
+	}
+
+	report := dryRunBody(t, got.stdout)
+	if report["file"] != path {
+		t.Errorf("file = %v, want %s", report["file"], path)
+	}
+	judgments, ok := report["judgments"].(map[string]any)
+	if !ok {
+		t.Fatalf("judgments is %T", report["judgments"])
+	}
+	if judgments["needs_interpretation"] != 0.07 {
+		t.Errorf("judgments = %v", judgments)
+	}
+
+	dry := invoke(t, "", "task", "--model", "m9", "--dry-run", path)
 	if dry.code != 0 {
 		t.Fatalf("dry-run code = %d, stderr = %s",
 			dry.code, dry.stderr)

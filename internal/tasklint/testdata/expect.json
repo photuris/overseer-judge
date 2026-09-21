@@ -1,0 +1,27 @@
+{
+  "good-01.md": {
+    "needs_interpretation": false,
+    "acceptance_vacuous": false,
+    "scope_generic": false
+  },
+  "good-02.md": {
+    "needs_interpretation": false,
+    "acceptance_vacuous": false,
+    "scope_generic": false
+  },
+  "vague-01.md": {
+    "needs_interpretation": true,
+    "acceptance_vacuous": false,
+    "scope_generic": false
+  },
+  "vacuous-01.md": {
+    "needs_interpretation": false,
+    "acceptance_vacuous": true,
+    "scope_generic": false
+  },
+  "generic-scope-01.md": {
+    "needs_interpretation": false,
+    "acceptance_vacuous": false,
+    "scope_generic": true
+  }
+}

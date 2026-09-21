@@ -1,0 +1,20 @@
+overseer-judge task [flags] <path|->
+
+lint an overseer task file for spec defects
+
+Output: the lint report as one JSON object: file, static, judgments, model, usage.
+
+Flags:
+  -dry-run
+    	print the request that would be sent and exit 0
+  -log-level string
+    	stderr diagnostics: debug, info, warn, error (default "warn")
+  -model string
+    	Jev model (default from TYPESAFE_DEFAULT_MODEL)
+  -pretty
+    	indent JSON output
+  -timeout duration
+    	timeout for each HTTP attempt (default 10s)
+
+Example:
+  overseer-judge task --pretty .overseer/tasks/003-tasklint.md
