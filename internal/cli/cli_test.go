@@ -495,13 +495,18 @@ const sessionVerdict = `{"model":"m9","answers":{` +
 // carries the cleaned tail, the extracted input line, the agent kind,
 // and the model override; the verdict echoes the same input line; and
 // --dry-run prints exactly the body that was sent.
+// sessionParity is one row of the session parity table: a fixture,
+// the agent kind that drew it, the input line the request must carry,
+// and a substring of the activity hint it must carry ("" for none).
+type sessionParity struct {
+	kind, fixture, wantInput, wantHint string
+}
+
 func TestSessionRequestParity(t *testing.T) {
-	tests := []struct {
-		kind, fixture, wantInput string
-	}{
+	tests := []sessionParity{
 		{
 			kind:      "claude",
-			fixture:   "unsubmitted-01.txt",
+			fixture:   "ambiguous-01.txt",
 			wantInput: "go ahead and stub resources/tmux.md",
 		},
 		{
@@ -509,25 +514,34 @@ func TestSessionRequestParity(t *testing.T) {
 			fixture:   "unsubmitted-04.txt",
 			wantInput: "add a regression test for the empty case",
 		},
-		{kind: "pi", fixture: "idle-05.txt", wantInput: ""},
+		{kind: "pi", fixture: "idle-05.txt"},
 		{
 			kind:      "opencode",
 			fixture:   "unsubmitted-03.txt",
 			wantInput: "refactor the parser to use a state table",
 		},
-		{kind: "opencode", fixture: "idle-04.txt", wantInput: ""},
+		{kind: "opencode", fixture: "idle-04.txt"},
 		{
 			kind:      "opencode",
 			fixture:   "unsubmitted-05.txt",
 			wantInput: "now add a unit test for greet",
 		},
-		{kind: "opencode", fixture: "idle-06.txt", wantInput: ""},
-		{kind: "pi", fixture: "working-04.txt", wantInput: ""},
+		{kind: "opencode", fixture: "idle-06.txt"},
+		{
+			kind:     "pi",
+			fixture:  "working-04.txt",
+			wantHint: "Working",
+		},
+		{
+			kind:     "opencode",
+			fixture:  "working-05.txt",
+			wantHint: "esc interrupt",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.kind+"/"+tt.fixture, func(t *testing.T) {
-			checkSessionParity(t, tt.kind, tt.fixture, tt.wantInput)
+			checkSessionParity(t, tt)
 		})
 	}
 }
@@ -535,10 +549,11 @@ func TestSessionRequestParity(t *testing.T) {
 // checkSessionParity runs the session verb against a local server for
 // one fixture and agent kind, and checks the request, the verdict,
 // and the --dry-run body against each other.
-func checkSessionParity(t *testing.T, kind, name, wantInput string) {
+func checkSessionParity(t *testing.T, tt sessionParity) {
 	t.Helper()
 
-	fixture := filepath.Join("..", "session", "testdata", name)
+	kind, wantInput := tt.kind, tt.wantInput
+	fixture := filepath.Join("..", "session", "testdata", tt.fixture)
 	raw, err := os.ReadFile(fixture)
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
@@ -586,6 +601,15 @@ func checkSessionParity(t *testing.T, kind, name, wantInput string) {
 		t.Errorf("sent input_line = %q, want %q",
 			state["input_line"], wantInput)
 	}
+	hint, ok := state["activity_hint"].(string)
+	if !ok {
+		t.Fatalf("activity_hint is %T", state["activity_hint"])
+	}
+	if !strings.Contains(hint, tt.wantHint) ||
+		(tt.wantHint == "" && hint != "") {
+		t.Errorf("sent activity_hint = %q, want %q in it",
+			hint, tt.wantHint)
+	}
 
 	var verdict session.Verdict
 	if err := json.Unmarshal([]byte(got.stdout), &verdict); err != nil {
@@ -594,6 +618,10 @@ func checkSessionParity(t *testing.T, kind, name, wantInput string) {
 	if verdict.InputLine != wantInput {
 		t.Errorf("verdict input_line = %q, want %q",
 			verdict.InputLine, wantInput)
+	}
+	if verdict.ActivityHint != hint {
+		t.Errorf("verdict activity_hint = %q, want the sent %q",
+			verdict.ActivityHint, hint)
 	}
 
 	dry := invoke(t, "", append(args, "--dry-run")...)

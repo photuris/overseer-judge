@@ -8,13 +8,15 @@ import (
 )
 
 // stateInstructions is the instruction text for the state question.
-const stateInstructions = "`transcript_tail` is the most recent " +
-	"terminal output of a coding agent (`agent_kind`) running in a " +
-	"terminal pane. `input_line` is the text currently sitting in " +
-	"the agent's input box, extracted by code (empty string if the " +
-	"box is empty or was not found). Classify what the pane is " +
-	"doing right now, judged by the last few screens of output, " +
-	"giving most weight to the final lines."
+const stateInstructions = "`transcript_tail` is the most recent terminal " +
+	"output of a coding agent (`agent_kind`) running in a terminal pane. " +
+	"`input_line` is the text currently sitting in the agent's input box, " +
+	"extracted by code (empty string if the box is empty or was not found). " +
+	"`activity_hint` is the agent's own busy-indicator line as found on " +
+	"screen by code, for example a spinner or progress bar beside 'esc to " +
+	"interrupt'; it is an empty string when no busy indicator is on screen. " +
+	"Classify what the pane is doing right now, judged by the last few " +
+	"screens of output, giving most weight to the final lines."
 
 // coherentInstructions is the instruction text for the coherent
 // question.
@@ -23,6 +25,12 @@ const coherentInstructions = "Is the most recent output in " +
 	"as opposed to repetition loops, mixed-language gibberish, or " +
 	"random tokens?"
 
+// Gate is the confidence a session verdict must reach before a
+// caller acts on it unattended: below this, callers should escalate
+// to a person or a reasoning model. Nothing here enforces it; it is
+// exported for the live test and for callers to compare against.
+const Gate = 0.9
+
 // Verdict is the session judgment.
 type Verdict struct {
 	State         string             `json:"state"`
@@ -30,6 +38,7 @@ type Verdict struct {
 	Probabilities map[string]float64 `json:"probabilities"`
 	Coherent      float64            `json:"coherent"`
 	InputLine     string             `json:"input_line"`
+	ActivityHint  string             `json:"activity_hint"`
 	Model         string             `json:"model"`
 	Usage         jev.Usage          `json:"usage"`
 }
@@ -38,16 +47,17 @@ type Verdict struct {
 // between, each with the description the model judges against.
 func stateCriteria() map[string]string {
 	return map[string]string{
-		"working": "The agent is actively producing coherent, " +
-			"on-task output: tool calls, code, file edits, test " +
-			"runs, or prose that advances a task. A spinner, " +
-			"elapsed-time counter, or 'thinking' indicator on " +
-			"screen counts as working. Text in `input_line` does " +
-			"not, by itself, mean the agent is working.",
+		"working": "The agent is busy right now and its output is coherent. " +
+			"`activity_hint` is non-empty, showing the agent's own busy " +
+			"indicator; a busy indicator with no output yet still counts. When " +
+			"`activity_hint` is empty, choose this only if the final lines show a " +
+			"tool call or command still in progress. Finished output above an " +
+			"input box is not working, and text in `input_line` does not mean the " +
+			"agent is working.",
 		"idle": "The agent has finished and is waiting for input. " +
-			"`input_line` is empty or holds only the tool's " +
-			"placeholder hint (for example 'Ask Codex to do " +
-			"anything'), and there is no dialog.",
+			"`activity_hint` is empty, `input_line` is empty or holds only the " +
+			"tool's placeholder hint (for example 'Ask Codex to do anything'), " +
+			"and there is no dialog.",
 		"dialog": "A modal UI that blocks the agent until a person " +
 			"responds: an approval or permission prompt, a " +
 			"folder-trust prompt, a numbered or yes/no choice " +
@@ -55,19 +65,19 @@ func stateCriteria() map[string]string {
 			"that must be dismissed before work can continue. " +
 			"Informational banners, warnings, update notices, and " +
 			"tips that do not wait for a keypress are not dialogs.",
-		"unsubmitted": "`input_line` holds text a person typed (an " +
-			"instruction, question, or partial message, not the " +
-			"tool's placeholder hint), and no spinner, progress " +
-			"line, or tool call shows the agent acting on it. The " +
-			"text has been typed but not sent.",
+		"unsubmitted": "`input_line` holds text a person typed (an instruction, " +
+			"question, or partial message, not the tool's placeholder hint) and " +
+			"`activity_hint` is empty, so the agent is not acting on it. The text " +
+			"has been typed but not sent, however much finished output sits above " +
+			"it.",
 		"error": "The agent's work ended with an API error, crash, " +
 			"stack trace, connection failure, or process exit, and " +
 			"it is not continuing.",
-		"degraded": "The output has become incoherent: the same " +
-			"line or phrase repeating many times, mixed-language " +
-			"token salad, random characters, or text that no " +
-			"longer relates to any task, while the agent appears " +
-			"to keep producing it.",
+		"degraded": "The output has become incoherent: the same line or phrase " +
+			"repeating many times, mixed-language token salad, random characters, " +
+			"or text that no longer relates to any task. This holds even when " +
+			"`activity_hint` shows a busy indicator, because a degraded agent " +
+			"keeps producing.",
 	}
 }
 
@@ -106,6 +116,7 @@ func State(agentKind, tail string) map[string]any {
 		"agent_kind":      agentKind,
 		"transcript_tail": tail,
 		"input_line":      InputLine(agentKind, tail),
+		"activity_hint":   ActivityHint(agentKind, tail),
 	}
 }
 
@@ -162,6 +173,7 @@ func Judge(
 		Probabilities: probs,
 		Coherent:      coherent,
 		InputLine:     InputLine(agentKind, cleaned),
+		ActivityHint:  ActivityHint(agentKind, cleaned),
 		Model:         resp.Model,
 		Usage:         resp.Usage,
 	}, nil

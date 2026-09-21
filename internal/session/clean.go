@@ -4,6 +4,7 @@ package session
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -591,4 +592,139 @@ func firstRune(line string) rune {
 	}
 
 	return 0
+}
+
+// hintLines is how many of a pane's last non-empty lines a busy
+// indicator may hide in, and maxHint is how many runes of the line
+// that carries it reach the model.
+const (
+	hintLines = 12
+	maxHint   = 100
+)
+
+// interruptPhrases are the phrases an agent draws beside the key that
+// interrupts it while it works, lower-cased for matching. pi's static
+// "escape interrupt" key hint is deliberately not one of them: it is
+// on screen whether or not the agent is busy.
+var interruptPhrases = []string{"esc to interrupt", "esc interrupt"}
+
+// hint finds an agent's busy indicator among the last lines of a pane
+// and returns the text of it. found reports whether the shape the
+// strategy looks for was there at all, which is not the same as the
+// text being non-empty: a rule carrying only spaces is found and
+// empty.
+type hint func(lines []string) (text string, found bool)
+
+// ActivityHint returns the agent's own busy-indicator line as found
+// in cleaned (post-Clean) text, or "". It looks only at the last
+// hintLines non-empty lines, runs the strategies for agentKind in
+// order, and returns the result of the FIRST one that finds its
+// shape:
+//
+//	claude, codex, opencode: interrupt
+//	pi:                      label
+//	unknown (or anything else): interrupt, then label
+//
+// ponytail: a pane whose visible text merely quotes "esc to
+// interrupt" in its last 12 lines reads as busy. Tighten to per-agent
+// line shapes if that bites.
+func ActivityHint(agentKind, cleaned string) string {
+	lines := lastNonEmpty(strings.Split(cleaned, "\n"), hintLines)
+
+	for _, find := range hintsFor(agentKind) {
+		if text, found := find(lines); found {
+			return text
+		}
+	}
+
+	return ""
+}
+
+// hintsFor returns the busy-indicator strategies to try for an agent
+// kind, in order. An unrecognised kind tries both.
+func hintsFor(agentKind string) []hint {
+	switch agentKind {
+	case "claude", "codex", "opencode":
+		return []hint{interruptHint}
+	case "pi":
+		return []hint{labelHint}
+	default:
+		return []hint{interruptHint, labelHint}
+	}
+}
+
+// lastNonEmpty returns the last n lines holding more than whitespace,
+// in the order they appear.
+func lastNonEmpty(lines []string, n int) []string {
+	out := make([]string, 0, n)
+
+	for i := len(lines) - 1; i >= 0 && len(out) < n; i-- {
+		if strings.TrimSpace(lines[i]) != "" {
+			out = append(out, lines[i])
+		}
+	}
+	slices.Reverse(out)
+
+	return out
+}
+
+// interruptHint returns the last line carrying an interrupt phrase,
+// its whitespace collapsed to single spaces and cut to maxHint runes.
+// Matching is case-insensitive; every phrase is ASCII.
+func interruptHint(lines []string) (string, bool) {
+	for i := len(lines) - 1; i >= 0; i-- {
+		lower := strings.ToLower(lines[i])
+		for _, phrase := range interruptPhrases {
+			if strings.Contains(lower, phrase) {
+				return cutRunes(collapseSpaces(lines[i])), true
+			}
+		}
+	}
+
+	return "", false
+}
+
+// labelHint returns the label on the last labelled rule, which is how
+// pi says it is working: "──  Working ────…" yields "Working". A rule
+// of nothing but rule runes carries no label, so it is not found.
+func labelHint(lines []string) (string, bool) {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if !isRule(lines[i]) {
+			continue
+		}
+
+		label := strings.Map(dropRuleRune, lines[i])
+		if label == "" {
+			continue
+		}
+
+		return collapseSpaces(label), true
+	}
+
+	return "", false
+}
+
+// dropRuleRune deletes pi's rule rune and keeps everything else.
+func dropRuleRune(r rune) rune {
+	if r == ruleRune {
+		return -1
+	}
+
+	return r
+}
+
+// collapseSpaces trims a line and collapses every run of whitespace
+// in it to one space.
+func collapseSpaces(line string) string {
+	return strings.Join(strings.Fields(line), " ")
+}
+
+// cutRunes cuts a line to maxHint runes.
+func cutRunes(line string) string {
+	runes := []rune(line)
+	if len(runes) <= maxHint {
+		return line
+	}
+
+	return string(runes[:maxHint])
 }

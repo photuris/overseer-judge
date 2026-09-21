@@ -81,6 +81,7 @@ stdout is one compact JSON object; `--pretty` indents it:
   },
   "coherent": 0.97,
   "input_line": "",
+  "activity_hint": "",
   "model": "jev-latest",
   "usage": {"input_tokens": 1183, "output_tokens": 9}
 }
@@ -106,6 +107,19 @@ The result is empty when the box is empty, when it holds a dialog menu
 option, or when it holds a placeholder hint such as `Ask anything…`.
 It is sent as part of the state and echoed in the verdict, so a caller
 can see what the classifier was told.
+
+`activity_hint` is the agent's own busy-indicator line, extracted the
+same way: the line carrying `esc to interrupt` or `esc interrupt` for
+`claude`, `codex`, and `opencode`; the label on pi's rule, as in
+`──  Working ───…`; and for `unknown`, the interrupt line, then the
+label. Only the last 12 non-empty lines are searched and the result is
+cut to 100 runes. It is empty when nothing on screen says the agent is
+busy. This is what keeps a pane that has just started work — a
+progress bar and no output yet — out of `idle`.
+
+Act on a verdict only when its `confidence` clears `session.Gate`
+(0.9). Below that, escalate to a person or to a reasoning model: no
+wrong answer in this project's live runs has ever scored above it.
 
 **Feed it ANSI, not plain text.** Only ANSI input lets the tool drop an
 agent's greyed-out prompt suggestion, which Claude Code renders as

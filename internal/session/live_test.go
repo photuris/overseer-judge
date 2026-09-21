@@ -21,6 +21,11 @@ import (
 // CLI default because a cold model is slower than a warm one.
 const liveTimeout = 30 * time.Second
 
+// ambiguousLabel marks the fixtures that have no knowable label, so
+// the run asserts calibration on them instead: whatever they are
+// classified as, the confidence must stay below Gate.
+const ambiguousLabel = "ambiguous"
+
 // TestLiveFixtures classifies every fixture against the real API and
 // records the label and confidence it came back with. This is the
 // POC's measurement, so it runs every fixture even after a failure.
@@ -68,10 +73,21 @@ func TestLiveFixtures(t *testing.T) {
 			continue
 		}
 
-		t.Logf("%s: state=%s conf=%.2f coherent=%.2f",
-			name, v.State, v.Confidence, v.Coherent)
+		t.Logf("%s: state=%s conf=%.2f coherent=%.2f hint=%q",
+			name, v.State, v.Confidence, v.Coherent, v.ActivityHint)
 
-		if want := expectedLabel(name); v.State != want {
+		want := expectedLabel(name)
+		if want == ambiguousLabel {
+			if v.Confidence >= Gate {
+				t.Errorf("%s: chose %q at %.2f, want confidence "+
+					"below the %.2f gate (probabilities %v)",
+					name, v.State, v.Confidence, Gate,
+					v.Probabilities)
+			}
+
+			continue
+		}
+		if v.State != want {
 			t.Errorf("%s: state = %q, want %q (probabilities %v)",
 				name, v.State, want, v.Probabilities)
 		}

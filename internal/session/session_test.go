@@ -407,20 +407,21 @@ func TestIsRule(t *testing.T) {
 // listed under the agent that drew it and under unknown, which must
 // reach the same answer without being told.
 var fixtureInputLines = map[string]string{
-	"degraded-01.txt":    "",
-	"degraded-02.txt":    "",
-	"dialog-01.txt":      "",
-	"dialog-02.txt":      "",
-	"error-01.txt":       "",
-	"error-02.txt":       "",
-	"idle-01.txt":        "",
-	"idle-02.txt":        "",
-	"idle-03.txt":        "",
-	"idle-04.txt":        "",
-	"idle-05.txt":        "",
-	"idle-06.txt":        "",
-	"idle-07.txt":        "",
-	"unsubmitted-01.txt": "go ahead and stub resources/tmux.md",
+	"ambiguous-01.txt": "go ahead and stub resources/tmux.md",
+	"degraded-01.txt":  "",
+	"degraded-02.txt":  "",
+	"dialog-01.txt":    "",
+	"dialog-02.txt":    "",
+	"error-01.txt":     "",
+	"error-02.txt":     "",
+	"idle-01.txt":      "",
+	"idle-02.txt":      "",
+	"idle-03.txt":      "",
+	"idle-04.txt":      "",
+	"idle-05.txt":      "",
+	"idle-06.txt":      "",
+	"idle-07.txt":      "",
+	"idle-08.txt":      "",
 	"unsubmitted-02.txt": "take option 2, and add a test that the " +
 		"cooked path has no escapes",
 	"unsubmitted-03.txt": "refactor the parser to use a state table",
@@ -430,6 +431,7 @@ var fixtureInputLines = map[string]string{
 	"working-02.txt":     "",
 	"working-03.txt":     "",
 	"working-04.txt":     "",
+	"working-05.txt":     "",
 }
 
 // fixtureAgents names the agent that drew each capture that is not
@@ -438,9 +440,11 @@ var fixtureInputLines = map[string]string{
 var fixtureAgents = map[string]string{
 	"idle-04.txt":        "opencode",
 	"idle-06.txt":        "opencode",
+	"idle-08.txt":        "opencode",
 	"unsubmitted-03.txt": "opencode",
 	"unsubmitted-05.txt": "opencode",
 	"working-03.txt":     "opencode",
+	"working-05.txt":     "opencode",
 	"idle-05.txt":        "pi",
 	"idle-07.txt":        "pi",
 	"unsubmitted-04.txt": "pi",
@@ -730,20 +734,25 @@ const (
 		"output of a coding agent (`agent_kind`) running in a terminal pane. " +
 		"`input_line` is the text currently sitting in the agent's input box, " +
 		"extracted by code (empty string if the box is empty or was not found). " +
+		"`activity_hint` is the agent's own busy-indicator line as found on " +
+		"screen by code, for example a spinner or progress bar beside 'esc to " +
+		"interrupt'; it is an empty string when no busy indicator is on screen. " +
 		"Classify what the pane is doing right now, judged by the last few " +
 		"screens of output, giving most weight to the final lines."
 	wantCoherentInstructions = "Is the most recent output in " +
 		"`transcript_tail` coherent, on-task natural language or code, as " +
 		"opposed to repetition loops, mixed-language gibberish, or random " +
 		"tokens?"
-	wantWorking = "The agent is actively producing coherent, on-task output: " +
-		"tool calls, code, file edits, test runs, or prose that advances a " +
-		"task. A spinner, elapsed-time counter, or 'thinking' indicator on " +
-		"screen counts as working. Text in `input_line` does not, by itself, " +
-		"mean the agent is working."
-	wantIdle = "The agent has finished and is waiting for input. `input_line` " +
-		"is empty or holds only the tool's placeholder hint (for example 'Ask " +
-		"Codex to do anything'), and there is no dialog."
+	wantWorking = "The agent is busy right now and its output is coherent. " +
+		"`activity_hint` is non-empty, showing the agent's own busy indicator; " +
+		"a busy indicator with no output yet still counts. When `activity_hint` " +
+		"is empty, choose this only if the final lines show a tool call or " +
+		"command still in progress. Finished output above an input box is not " +
+		"working, and text in `input_line` does not mean the agent is working."
+	wantIdle = "The agent has finished and is waiting for input. " +
+		"`activity_hint` is empty, `input_line` is empty or holds only the " +
+		"tool's placeholder hint (for example 'Ask Codex to do anything'), and " +
+		"there is no dialog."
 	wantDialog = "A modal UI that blocks the agent until a person responds: " +
 		"an approval or permission prompt, a folder-trust prompt, a numbered " +
 		"or yes/no choice under a cursor, or a usage-limit or rate-limit " +
@@ -752,14 +761,16 @@ const (
 		"not wait for a keypress are not dialogs."
 	wantUnsubmitted = "`input_line` holds text a person typed (an " +
 		"instruction, question, or partial message, not the tool's placeholder " +
-		"hint), and no spinner, progress line, or tool call shows the agent " +
-		"acting on it. The text has been typed but not sent."
+		"hint) and `activity_hint` is empty, so the agent is not acting on it. " +
+		"The text has been typed but not sent, however much finished output " +
+		"sits above it."
 	wantError = "The agent's work ended with an API error, crash, stack " +
 		"trace, connection failure, or process exit, and it is not continuing."
 	wantDegraded = "The output has become incoherent: the same line or phrase " +
 		"repeating many times, mixed-language token salad, random characters, " +
-		"or text that no longer relates to any task, while the agent appears to " +
-		"keep producing it."
+		"or text that no longer relates to any task. This holds even when " +
+		"`activity_hint` shows a busy indicator, because a degraded agent keeps " +
+		"producing."
 	wantCoherentTrue = "The latest output reads as purposeful text or code a " +
 		"competent engineer would write."
 	wantCoherentFalse = "The latest output is repetitive, garbled, " +
@@ -808,5 +819,242 @@ func TestQuestionWordingIsVerbatim(t *testing.T) {
 	if coherent["false"] != wantCoherentFalse {
 		t.Errorf("coherent false drifted:\n got %q\nwant %q",
 			coherent["false"], wantCoherentFalse)
+	}
+}
+
+// ── ActivityHint ────────────────────────────────────────────────────────────
+
+// filler returns n non-empty lines of ordinary output.
+func filler(n int) []string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = "some output"
+	}
+
+	return out
+}
+
+// above puts line above n non-empty lines, so a caller can push it
+// out of the window ActivityHint reads.
+func above(line string, n int) string {
+	return strings.Join(append([]string{line}, filler(n)...), "\n")
+}
+
+func TestActivityHint(t *testing.T) {
+	const busy = "✶ Wrangling… (esc to interrupt · 1m 14s)"
+
+	tests := []struct {
+		name, kind, cleaned, want string
+	}{
+		{"nothing on screen", "claude", "all done\n❯", ""},
+		{"empty", "unknown", "", ""},
+		{"the claude footer", "claude", busy, busy},
+		{
+			name:    "case does not matter",
+			kind:    "claude",
+			cleaned: "ESC TO INTERRUPT",
+			want:    "ESC TO INTERRUPT",
+		},
+		{
+			name:    "opencode drops the to",
+			kind:    "opencode",
+			cleaned: "⬝⬝⬝⬝  esc interrupt  tab agents",
+			want:    "⬝⬝⬝⬝ esc interrupt tab agents",
+		},
+		{
+			name:    "pi's static key hint is not a busy indicator",
+			kind:    "unknown",
+			cleaned: "escape interrupt · ctrl+c quit",
+			want:    "",
+		},
+		{
+			name:    "the twelfth-from-last line still counts",
+			kind:    "claude",
+			cleaned: above(busy, 11),
+			want:    busy,
+		},
+		{
+			name:    "the thirteenth-from-last line does not",
+			kind:    "claude",
+			cleaned: above(busy, 12),
+			want:    "",
+		},
+		{
+			name:    "blank lines do not fill the window",
+			kind:    "claude",
+			cleaned: busy + "\n\n\n" + strings.Join(filler(11), "\n"),
+			want:    busy,
+		},
+		{
+			name:    "the last matching line wins",
+			kind:    "claude",
+			cleaned: "first (esc to interrupt)\nlast (esc to interrupt)",
+			want:    "last (esc to interrupt)",
+		},
+		{
+			name:    "a long line is cut to 100 runes",
+			kind:    "claude",
+			cleaned: "esc to interrupt " + strings.Repeat("x", 103),
+			want:    "esc to interrupt " + strings.Repeat("x", 83),
+		},
+
+		// labelled rules
+		{
+			name:    "pi reads its labelled rule",
+			kind:    "pi",
+			cleaned: "streamed output\n" + labelled(" Working"),
+			want:    "Working",
+		},
+		{
+			name:    "a plain rule carries no label",
+			kind:    "pi",
+			cleaned: "all done\n" + rule,
+			want:    "",
+		},
+		{
+			name:    "a rule labelled with spaces is found and empty",
+			kind:    "pi",
+			cleaned: "all done\n── " + rule,
+			want:    "",
+		},
+		{
+			name:    "the last labelled rule wins",
+			kind:    "pi",
+			cleaned: labelled(" Thinking") + "\n" + labelled(" Working"),
+			want:    "Working",
+		},
+
+		// strategy selection
+		{
+			name:    "pi ignores an interrupt line",
+			kind:    "pi",
+			cleaned: busy,
+			want:    "",
+		},
+		{
+			name:    "claude ignores a labelled rule",
+			kind:    "claude",
+			cleaned: labelled(" Working"),
+			want:    "",
+		},
+		{
+			name:    "opencode ignores a labelled rule",
+			kind:    "opencode",
+			cleaned: labelled(" Working"),
+			want:    "",
+		},
+		{
+			name:    "unknown reads a labelled rule",
+			kind:    "unknown",
+			cleaned: labelled(" Working"),
+			want:    "Working",
+		},
+		{
+			name:    "unknown prefers the interrupt line",
+			kind:    "unknown",
+			cleaned: labelled(" Working") + "\n" + busy,
+			want:    busy,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ActivityHint(tt.kind, tt.cleaned)
+			if got != tt.want {
+				t.Errorf("ActivityHint(%q, %q) = %q, want %q",
+					tt.kind, tt.cleaned, got, tt.want)
+			}
+		})
+	}
+}
+
+// fixtureHints is the busy indicator every fixture shows. want is the
+// whole hint where the line is short enough to pin; phrase is a
+// substring of it where the agent draws a whole status bar into the
+// line. Each fixture is checked under the agent that drew it and
+// under unknown.
+var fixtureHints = map[string]struct{ want, phrase string }{
+	"ambiguous-01.txt":   {},
+	"degraded-01.txt":    {phrase: "esc to interrupt"},
+	"degraded-02.txt":    {phrase: "esc to interrupt"},
+	"dialog-01.txt":      {},
+	"dialog-02.txt":      {},
+	"error-01.txt":       {},
+	"error-02.txt":       {},
+	"idle-01.txt":        {},
+	"idle-02.txt":        {},
+	"idle-03.txt":        {},
+	"idle-04.txt":        {},
+	"idle-05.txt":        {},
+	"idle-06.txt":        {},
+	"idle-07.txt":        {},
+	"idle-08.txt":        {},
+	"unsubmitted-02.txt": {},
+	"unsubmitted-03.txt": {},
+	"unsubmitted-04.txt": {},
+	"unsubmitted-05.txt": {},
+	"working-01.txt":     {phrase: "esc to interrupt"},
+	"working-02.txt":     {phrase: "esc to interrupt"},
+	"working-03.txt":     {phrase: "esc interrupt"},
+	"working-04.txt":     {want: "Working"},
+	"working-05.txt":     {phrase: "esc interrupt"},
+}
+
+func TestActivityHintOnFixtures(t *testing.T) {
+	paths, err := filepath.Glob(filepath.Join("testdata", "*.txt"))
+	if err != nil {
+		t.Fatalf("list fixtures: %v", err)
+	}
+	if len(paths) != len(fixtureHints) {
+		t.Errorf("testdata holds %d fixtures, fixtureHints has %d",
+			len(paths), len(fixtureHints))
+	}
+
+	for _, path := range paths {
+		name := filepath.Base(path)
+		t.Run(name, func(t *testing.T) {
+			tt, ok := fixtureHints[name]
+			if !ok {
+				t.Fatalf("fixtureHints has no entry for %s", name)
+			}
+
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read fixture: %v", err)
+			}
+			cleaned := Clean(string(raw), MaxLines, MaxBytes)
+
+			kinds := []string{"unknown"}
+			if kind, ok := fixtureAgents[name]; ok {
+				kinds = append(kinds, kind)
+			}
+
+			for _, kind := range kinds {
+				got := ActivityHint(kind, cleaned)
+				if tt.phrase == "" {
+					if got != tt.want {
+						t.Errorf("ActivityHint(%q) = %q, want %q",
+							kind, got, tt.want)
+					}
+
+					continue
+				}
+				if !strings.Contains(got, tt.phrase) {
+					t.Errorf("ActivityHint(%q) = %q, want a line "+
+						"carrying %q", kind, got, tt.phrase)
+				}
+			}
+		})
+	}
+}
+
+func TestStateCarriesTheActivityHint(t *testing.T) {
+	got := State("claude", "working\n✶ Wrangling… (esc to interrupt)")
+	if got["activity_hint"] != "✶ Wrangling… (esc to interrupt)" {
+		t.Errorf("activity_hint = %v", got["activity_hint"])
+	}
+
+	if got := State("claude", "all done\n❯")["activity_hint"]; got != "" {
+		t.Errorf("activity_hint = %v, want empty", got)
 	}
 }

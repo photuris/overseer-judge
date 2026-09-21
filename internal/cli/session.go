@@ -43,7 +43,7 @@ func sessionCommand() command {
 		args:    "--input <path|-> [flags]",
 		output: "the verdict as one JSON object: state, " +
 			"confidence, probabilities, coherent, input_line, " +
-			"model, usage.",
+			"activity_hint, model, usage.",
 		example: sessionExample,
 		flags: func(fs *flag.FlagSet) {
 			fs.StringVar(&input, "input", "",
