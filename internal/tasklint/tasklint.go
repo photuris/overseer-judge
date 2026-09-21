@@ -8,6 +8,11 @@ import (
 	"overseer-judge/internal/jev"
 )
 
+// SoundCut is the acceptance score at or above which a task's
+// Expect lines are read as sound. It is provisional: it was fitted
+// to five fixtures, so re-measure before trusting it on new ones.
+const SoundCut = 2.2
+
 // interpretationInstructions is the instruction text for the
 // needs_interpretation question.
 const interpretationInstructions = "The state is one task " +
@@ -18,13 +23,13 @@ const interpretationInstructions = "The state is one task " +
 	"decisions, choose between approaches, or guess intent, rather " +
 	"than execute steps and interfaces the spec states?"
 
-// vacuousInstructions is the instruction text for the
-// acceptance_vacuous question.
-const vacuousInstructions = "`acceptance` lists shell commands with " +
-	"an `Expect:` line each. Could the expectation be met even if " +
-	"the work were wrong or incomplete, because it checks only that " +
-	"a command runs, prints something, or exits 0 without asserting " +
-	"the specific result the objective requires?"
+// strengthInstructions is the instruction text for the
+// acceptance_strength question.
+const strengthInstructions = "`acceptance` lists shell commands, " +
+	"each with an `Expect:` line, used to decide whether a coding " +
+	"task described by `objective` was completed correctly. Rate " +
+	"how well the Expect lines would catch a wrong or incomplete " +
+	"implementation."
 
 // scopeInstructions is the instruction text for the scope_generic
 // question.
@@ -34,13 +39,25 @@ const scopeInstructions = "`out_of_scope` should name the specific " +
 	"else' or restating that unlisted files are off limits, without " +
 	"naming concrete adjacent work?"
 
+// nouls are the questions whose answers land in Report.Judgments.
+var nouls = []string{"needs_interpretation", "scope_generic"}
+
+// Strength is the graded acceptance judgment: Score runs 0 (vacuous)
+// to 3 (every Expect is specific).
+type Strength struct {
+	Score      float64 `json:"score"`
+	Confidence float64 `json:"confidence"`
+}
+
 // Report is the full lint output for one task file.
 type Report struct {
 	File      string             `json:"file"`
 	Static    []Finding          `json:"static"`
 	Judgments map[string]float64 `json:"judgments,omitempty"`
-	Model     string             `json:"model,omitempty"`
-	Usage     jev.Usage          `json:"usage"`
+	// Acceptance is nil when the model call is skipped.
+	Acceptance *Strength `json:"acceptance,omitempty"`
+	Model      string    `json:"model,omitempty"`
+	Usage      jev.Usage `json:"usage"`
 }
 
 // interpretationCriteria returns the two outcomes the
@@ -58,16 +75,23 @@ func interpretationCriteria() map[string]string {
 	}
 }
 
-// vacuousCriteria returns the two outcomes the acceptance_vacuous
-// question is judged against.
-func vacuousCriteria() map[string]string {
-	return map[string]string{
-		"true": "The Expect lines could pass on an empty or broken " +
-			"implementation, or do not name a specific observable " +
-			"outcome.",
-		"false": "The Expect lines name specific output, counts, " +
-			"strings, or exit codes that a wrong implementation " +
-			"would fail.",
+// strengthCriteria returns the four levels the acceptance_strength
+// question scores against, worst first: the index of the level the
+// model picks is the score.
+func strengthCriteria() []string {
+	return []string{
+		"The Expect lines check only that something runs, prints " +
+			"anything, or exits 0. A wrong or empty implementation " +
+			"would pass.",
+		"The Expect lines mostly check that commands or a test " +
+			"suite pass, with little or nothing tied to the " +
+			"specific behavior the objective describes.",
+		"Some Expect lines name specific output, strings, counts, " +
+			"or exit codes tied to the objective, but at least one " +
+			"only checks that a command or test suite passes.",
+		"Every Expect line names specific output, strings, counts, " +
+			"or exit codes tied to the behavior the objective " +
+			"describes. A wrong implementation would fail.",
 	}
 }
 
@@ -91,10 +115,10 @@ func Questions() map[string]jev.Question {
 			Instructions: interpretationInstructions,
 			Criteria:     interpretationCriteria(),
 		},
-		"acceptance_vacuous": {
-			Type:         "noul",
-			Instructions: vacuousInstructions,
-			Criteria:     vacuousCriteria(),
+		"acceptance_strength": {
+			Type:         "score",
+			Instructions: strengthInstructions,
+			Criteria:     strengthCriteria(),
 		},
 		"scope_generic": {
 			Type:         "noul",
@@ -123,9 +147,9 @@ func Request(d Doc) jev.Request {
 }
 
 // Judge parses text, runs the static checks, and, unless the
-// document is missing the sections the questions read, asks the
-// three Nouls. When the model call is skipped the report carries the
-// static findings alone and no request is made.
+// document is missing the sections the questions read, asks the two
+// Nouls and the acceptance Score. When the model call is skipped the
+// report carries the static findings alone and no request is made.
 func Judge(
 	ctx context.Context,
 	c *jev.Client,
@@ -143,14 +167,20 @@ func Judge(
 		return Report{}, err
 	}
 
-	report.Judgments = make(map[string]float64, len(Questions()))
-	for id := range Questions() {
+	report.Judgments = make(map[string]float64, len(nouls))
+	for _, id := range nouls {
 		p, err := resp.Noul(id)
 		if err != nil {
 			return Report{}, err
 		}
 		report.Judgments[id] = p
 	}
+
+	score, confidence, err := resp.Score("acceptance_strength")
+	if err != nil {
+		return Report{}, err
+	}
+	report.Acceptance = &Strength{Score: score, Confidence: confidence}
 
 	report.Model = resp.Model
 	report.Usage = resp.Usage

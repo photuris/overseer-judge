@@ -24,7 +24,7 @@ func taskCommand() command {
 		summary: "lint an overseer task file for spec defects",
 		args:    "[flags] <path|->",
 		output: "the lint report as one JSON object: file, static, " +
-			"judgments, model, usage.",
+			"judgments, acceptance, model, usage.",
 		example: taskExample,
 		flags:   func(_ *flag.FlagSet) {},
 		run: func(

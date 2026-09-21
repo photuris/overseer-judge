@@ -24,7 +24,7 @@ import (
 const liveTimeout = 60 * time.Second
 
 // TestLiveFixtures lints every labelled fixture against the real API
-// and records the probabilities it came back with. This is the POC's
+// and records the judgments it came back with. This is the POC's
 // measurement, so it runs every fixture even after a failure.
 func TestLiveFixtures(t *testing.T) {
 	key, err := config.Key(config.DefaultKeyFile())
@@ -63,18 +63,36 @@ func TestLiveFixtures(t *testing.T) {
 			continue
 		}
 
-		t.Logf("%s: needs_interpretation=%.2f "+
-			"acceptance_vacuous=%.2f scope_generic=%.2f",
+		if report.Acceptance == nil {
+			t.Errorf("%s: no acceptance score", name)
+
+			continue
+		}
+
+		t.Logf("%s: needs_interpretation=%.2f scope_generic=%.2f "+
+			"acceptance=%.2f (conf %.2f)",
 			name,
 			report.Judgments["needs_interpretation"],
-			report.Judgments["acceptance_vacuous"],
-			report.Judgments["scope_generic"])
+			report.Judgments["scope_generic"],
+			report.Acceptance.Score,
+			report.Acceptance.Confidence)
 
 		for _, id := range slices.Sorted(maps.Keys(expect[name])) {
+			want := expect[name][id]
+			if id == "acceptance_sound" {
+				score := report.Acceptance.Score
+				if (score >= SoundCut) != want {
+					t.Errorf("%s: acceptance = %.2f, want sound=%v "+
+						"at cut %.2f", name, score, want, SoundCut)
+				}
+
+				continue
+			}
+
 			p := report.Judgments[id]
-			if (p > 0.5) != expect[name][id] {
+			if (p > 0.5) != want {
 				t.Errorf("%s: %s = %.2f, want %v at threshold 0.5",
-					name, id, p, expect[name][id])
+					name, id, p, want)
 			}
 		}
 	}

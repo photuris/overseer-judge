@@ -2,7 +2,7 @@ overseer-judge task [flags] <path|->
 
 lint an overseer task file for spec defects
 
-Output: the lint report as one JSON object: file, static, judgments, model, usage.
+Output: the lint report as one JSON object: file, static, judgments, acceptance, model, usage.
 
 Flags:
   -dry-run

@@ -17,7 +17,8 @@ import (
 // goodResponse answers all three questions.
 const goodResponse = `{"model":"jev-1","answers":{` +
 	`"needs_interpretation":{"type":"noul","noul":0.12},` +
-	`"acceptance_vacuous":{"type":"noul","noul":0.88},` +
+	`"acceptance_strength":{"type":"score","score":0.32,` +
+	`"confidence":0.81},` +
 	`"scope_generic":{"type":"noul","noul":0.05}},` +
 	`"usage":{"input_tokens":1400,"output_tokens":9}}`
 
@@ -217,7 +218,7 @@ func TestQuestions(t *testing.T) {
 	}
 
 	for _, id := range []string{
-		"needs_interpretation", "acceptance_vacuous", "scope_generic",
+		"needs_interpretation", "scope_generic",
 	} {
 		q, ok := qs[id]
 		if !ok {
@@ -235,6 +236,24 @@ func TestQuestions(t *testing.T) {
 		if criteria["true"] == "" || criteria["false"] == "" {
 			t.Errorf("%q lacks a true or false criterion", id)
 		}
+	}
+
+	strength, ok := qs["acceptance_strength"]
+	if !ok {
+		t.Fatal("Questions() has no acceptance_strength")
+	}
+	if strength.Type != "score" {
+		t.Errorf("acceptance_strength has type %q, want score",
+			strength.Type)
+	}
+	levels, ok := strength.Criteria.([]string)
+	if !ok {
+		t.Fatalf("acceptance_strength criteria is %T, want []string",
+			strength.Criteria)
+	}
+	if len(levels) != 4 {
+		t.Errorf("acceptance_strength has %d levels, want 4",
+			len(levels))
 	}
 }
 
@@ -301,15 +320,25 @@ func TestJudgeMapsEveryField(t *testing.T) {
 		t.Errorf("Static has %d findings, want %d",
 			len(report.Static), len(checks))
 	}
+	if len(report.Judgments) != 2 {
+		t.Errorf("Judgments = %v, want two entries", report.Judgments)
+	}
 	for id, want := range map[string]float64{
 		"needs_interpretation": 0.12,
-		"acceptance_vacuous":   0.88,
 		"scope_generic":        0.05,
 	} {
 		if report.Judgments[id] != want {
 			t.Errorf("Judgments[%q] = %v, want %v",
 				id, report.Judgments[id], want)
 		}
+	}
+	if report.Acceptance == nil {
+		t.Fatal("Acceptance is nil, want the score")
+	}
+	if report.Acceptance.Score != 0.32 ||
+		report.Acceptance.Confidence != 0.81 {
+		t.Errorf("Acceptance = %+v, want 0.32 at 0.81",
+			*report.Acceptance)
 	}
 	if report.Model != "jev-1" {
 		t.Errorf("Model = %q, want jev-1", report.Model)
@@ -353,6 +382,9 @@ func TestJudgeSkipsTheModelWhenSectionsAreMissing(t *testing.T) {
 	if report.Judgments != nil {
 		t.Errorf("Judgments = %v, want nil", report.Judgments)
 	}
+	if report.Acceptance != nil {
+		t.Errorf("Acceptance = %+v, want nil", *report.Acceptance)
+	}
 	if report.Model != "" || report.Usage != (jev.Usage{}) {
 		t.Errorf("Model = %q, Usage = %+v, want zero",
 			report.Model, report.Usage)
@@ -363,10 +395,12 @@ func TestJudgeSkipsTheModelWhenSectionsAreMissing(t *testing.T) {
 	}
 }
 
+// TestJudgeRejectsAMissingAnswer feeds back a response without the
+// acceptance_strength answer.
 func TestJudgeRejectsAMissingAnswer(t *testing.T) {
 	const body = `{"model":"jev-1","answers":{` +
 		`"needs_interpretation":{"type":"noul","noul":0.12},` +
-		`"acceptance_vacuous":{"type":"noul","noul":0.88}}}`
+		`"scope_generic":{"type":"noul","noul":0.05}}}`
 
 	report, _, err := judgeAgainst(t, body, "good-01.md")
 	if err == nil {
@@ -399,15 +433,21 @@ const (
 	wantInterpretationFalse = "The task names the concrete things that will " +
 		"exist (files, functions, types, behaviors) precisely enough that two " +
 		"engineers would build the same thing."
-	wantVacuous = "`acceptance` lists shell commands with an `Expect:` line " +
-		"each. Could the expectation be met even if the work were wrong or " +
-		"incomplete, because it checks only that a command runs, prints " +
-		"something, or exits 0 without asserting the specific result the " +
-		"objective requires?"
-	wantVacuousTrue = "The Expect lines could pass on an empty or broken " +
-		"implementation, or do not name a specific observable outcome."
-	wantVacuousFalse = "The Expect lines name specific output, counts, " +
-		"strings, or exit codes that a wrong implementation would fail."
+	wantStrength = "`acceptance` lists shell commands, each with an " +
+		"`Expect:` line, used to decide whether a coding task described by " +
+		"`objective` was completed correctly. Rate how well the Expect lines " +
+		"would catch a wrong or incomplete implementation."
+	wantLevel0 = "The Expect lines check only that something runs, prints " +
+		"anything, or exits 0. A wrong or empty implementation would pass."
+	wantLevel1 = "The Expect lines mostly check that commands or a test " +
+		"suite pass, with little or nothing tied to the specific behavior " +
+		"the objective describes."
+	wantLevel2 = "Some Expect lines name specific output, strings, counts, " +
+		"or exit codes tied to the objective, but at least one only checks " +
+		"that a command or test suite passes."
+	wantLevel3 = "Every Expect line names specific output, strings, counts, " +
+		"or exit codes tied to the behavior the objective describes. A wrong " +
+		"implementation would fail."
 	wantScope = "`out_of_scope` should name the specific tempting adjacent " +
 		"work an agent might do while completing `objective`. Is it generic " +
 		"instead, saying only 'anything else' or restating that unlisted " +
@@ -423,7 +463,7 @@ func TestQuestionWordingIsVerbatim(t *testing.T) {
 
 	for id, want := range map[string]string{
 		"needs_interpretation": wantInterpretation,
-		"acceptance_vacuous":   wantVacuous,
+		"acceptance_strength":  wantStrength,
 		"scope_generic":        wantScope,
 	} {
 		if got := qs[id].Instructions; got != want {
@@ -436,10 +476,6 @@ func TestQuestionWordingIsVerbatim(t *testing.T) {
 		"needs_interpretation": {
 			"true":  wantInterpretationTrue,
 			"false": wantInterpretationFalse,
-		},
-		"acceptance_vacuous": {
-			"true":  wantVacuousTrue,
-			"false": wantVacuousFalse,
 		},
 		"scope_generic": {
 			"true":  wantScopeTrue,
@@ -455,6 +491,24 @@ func TestQuestionWordingIsVerbatim(t *testing.T) {
 				t.Errorf("%s %s criterion drifted:\n got %q\nwant %q",
 					id, outcome, criteria[outcome], text)
 			}
+		}
+	}
+
+	levels, ok := qs["acceptance_strength"].Criteria.([]string)
+	if !ok {
+		t.Fatalf("acceptance_strength criteria is %T",
+			qs["acceptance_strength"].Criteria)
+	}
+	for i, text := range []string{
+		wantLevel0, wantLevel1, wantLevel2, wantLevel3,
+	} {
+		if i >= len(levels) {
+			t.Fatalf("acceptance_strength has %d levels, want 4",
+				len(levels))
+		}
+		if levels[i] != text {
+			t.Errorf("acceptance_strength level %d drifted:"+
+				"\n got %q\nwant %q", i, levels[i], text)
 		}
 	}
 }

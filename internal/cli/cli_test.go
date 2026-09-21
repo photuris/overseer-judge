@@ -489,7 +489,8 @@ func TestSessionRequestParity(t *testing.T) {
 // taskAnswers is the body the task parity server returns.
 const taskAnswers = `{"model":"jev-1","answers":{` +
 	`"needs_interpretation":{"type":"noul","noul":0.07},` +
-	`"acceptance_vacuous":{"type":"noul","noul":0.11},` +
+	`"acceptance_strength":{"type":"score","score":2.54,` +
+	`"confidence":0.83},` +
 	`"scope_generic":{"type":"noul","noul":0.04}},` +
 	`"usage":{"input_tokens":1400,"output_tokens":9}}`
 
@@ -525,6 +526,13 @@ func TestTaskRequestParity(t *testing.T) {
 	}
 	if judgments["needs_interpretation"] != 0.07 {
 		t.Errorf("judgments = %v", judgments)
+	}
+	acceptance, ok := report["acceptance"].(map[string]any)
+	if !ok {
+		t.Fatalf("acceptance is %T", report["acceptance"])
+	}
+	if acceptance["score"] != 2.54 || acceptance["confidence"] != 0.83 {
+		t.Errorf("acceptance = %v", acceptance)
 	}
 
 	dry := invoke(t, "", "task", "--model", "m9", "--dry-run", path)

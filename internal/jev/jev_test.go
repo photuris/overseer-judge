@@ -481,6 +481,35 @@ func TestChoiceAccessor(t *testing.T) {
 	}
 }
 
+func TestScoreAccessor(t *testing.T) {
+	score, conf := 2.54, 0.88
+	resp := &Response{Answers: map[string]Answer{
+		"ok":     {Type: "score", Score: &score, Confidence: &conf},
+		"wrong":  {Type: "noul", Score: &score, Confidence: &conf},
+		"nil":    {Type: "score", Confidence: &conf},
+		"noconf": {Type: "score", Score: &score},
+	}}
+
+	got, confidence, err := resp.Score("ok")
+	if err != nil {
+		t.Fatalf("Score(ok): %v", err)
+	}
+	if got != 2.54 || confidence != 0.88 {
+		t.Errorf("Score(ok) = %v, %v, want 2.54, 0.88",
+			got, confidence)
+	}
+
+	for _, id := range []string{"missing", "wrong", "nil", "noconf"} {
+		t.Run(id, func(t *testing.T) {
+			_, _, err := resp.Score(id)
+			var e *ResponseError
+			if !errors.As(err, &e) {
+				t.Fatalf("err = %v, want ResponseError", err)
+			}
+		})
+	}
+}
+
 // ── Response body handling (R1-01, R1-02, R1-03, R1-06) ─────────────────────
 
 // roundTripFunc adapts a function to http.RoundTripper so a test can

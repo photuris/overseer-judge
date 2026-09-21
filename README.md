@@ -115,11 +115,17 @@ Six structural checks run in code, always in the same order and always
 all six: `status_line`, `sections_present`, `sections_ordered`,
 `allowed_nonempty`, `acceptance_command`, `budget_numeric`. They are
 fence-aware, so a template quoted inside a fenced code block cannot
-satisfy or break a check. Three judgments come from the model, each a
-probability: `needs_interpretation` (the spec leaves design decisions
-to the implementer), `acceptance_vacuous` (the `Expect:` lines would
-pass on broken work), and `scope_generic` (`Out of scope` names no
-concrete adjacent work).
+satisfy or break a check.
+
+Three judgments come from the model. Two are probabilities in
+`judgments`: `needs_interpretation` (the spec leaves design decisions
+to the implementer) and `scope_generic` (`Out of scope` names no
+concrete adjacent work). The third, `acceptance`, is graded rather
+than yes/no, because acceptance quality is: `score` runs from 0, where
+the `Expect:` lines check only that a command runs, to 3, where every
+one of them names output a wrong implementation would fail. Read it
+against a cut, not a coin flip; `tasklint.SoundCut` is 2.2, fitted to
+five fixtures and provisional.
 
 ```json
 {
@@ -135,9 +141,9 @@ concrete adjacent work).
   ],
   "judgments": {
     "needs_interpretation": 0.07,
-    "acceptance_vacuous": 0.11,
     "scope_generic": 0.04
   },
+  "acceptance": {"score": 2.54, "confidence": 0.83},
   "model": "jev-latest",
   "usage": {"input_tokens": 1412, "output_tokens": 12}
 }
@@ -145,7 +151,8 @@ concrete adjacent work).
 
 A file missing its `## Objective` or `## Acceptance` section gives the
 model nothing to judge, so no request is made: the report carries the
-static findings alone, `judgments` and `model` are absent, and
+static findings alone, `judgments`, `acceptance`, and `model` are
+absent, and
 `--dry-run` prints `{"method":"","path":"","body":null,"static":[…]}`.
 
 ## Configuration

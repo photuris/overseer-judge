@@ -91,6 +91,37 @@ func (r *Response) Noul(id string) (float64, error) {
 	return *a.Noul, nil
 }
 
+// Score returns the score and confidence for a score answer. It
+// returns a *ResponseError when the answer is missing, its Type is
+// not "score", or Score or Confidence is nil.
+func (r *Response) Score(id string) (
+	score, confidence float64, err error,
+) {
+	a, ok := r.Answers[id]
+	if !ok {
+		return 0, 0, &ResponseError{
+			Message: fmt.Sprintf("answer %q missing", id),
+		}
+	}
+	if a.Type != "score" {
+		return 0, 0, &ResponseError{Message: fmt.Sprintf(
+			"answer %q has type %q, want \"score\"", id, a.Type,
+		)}
+	}
+	if a.Score == nil {
+		return 0, 0, &ResponseError{
+			Message: fmt.Sprintf("answer %q has no score value", id),
+		}
+	}
+	if a.Confidence == nil {
+		return 0, 0, &ResponseError{
+			Message: fmt.Sprintf("answer %q has no confidence", id),
+		}
+	}
+
+	return *a.Score, *a.Confidence, nil
+}
+
 // Choice returns the chosen label, confidence, and probabilities for
 // a choice answer. It returns a *ResponseError when the answer is
 // missing, Type is not "choice", Choice is empty, Confidence is nil,
