@@ -1,0 +1,36 @@
+overseer-judge <verb> [flags] [args]
+overseer-judge --help | --version
+
+Turns overseer judgments into typed JSON verdicts
+via TypeSafe's System One (Jev) API.
+
+Verbs:
+  raw      send an arbitrary Jev request read from --input
+
+All flags follow the verb. Every verb accepts these
+global flags:
+  --pretty              indent JSON output
+  --dry-run             print the request, exit 0
+  --model <name>        Jev model to ask
+  --timeout <duration>  per HTTP attempt (10s)
+  --log-level <level>   debug|info|warn|error (warn)
+  -h, --help            help for the verb, exit 0
+
+Input:
+  --input <path|->      read JSON from a file, or -
+                        for stdin.
+
+stdout is data only: one JSON document, compact
+unless --pretty. Failures print one JSON object as
+the last stderr line.
+
+Exit codes:
+  0    success
+  1    unexpected failure
+  2    usage: bad flags, missing argument, bad input
+  3    authentication failed or no API key
+  5    request rejected (422 or other 4xx)
+  6    rate limited after retries
+  7    upstream error (5xx after retries, or an invalid response)
+  8    network failure or timeout
+  130  interrupted (SIGINT)
