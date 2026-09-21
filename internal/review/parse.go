@@ -42,12 +42,16 @@ type parser struct {
 	body  []string
 	resp  []string
 	mode  int
+	// sawMeta reports whether the item in progress has had at least
+	// one metadata line, which decides what a blank line means.
+	sawMeta bool
 }
 
 // Parse extracts items in document order. An item starts at a "### "
 // header outside a fenced block, takes the file, severity, and status
-// lines that immediately follow, then a body that runs to the first
-// response, the next header, a "---" line, or EOF. A response runs
+// lines that follow it (real reviewers leave a blank line in
+// between), then a body that runs to the first response, the next
+// header, a "---" line, or EOF. A response runs
 // through indented continuation lines; a line that ends one without
 // being a terminator is ignored, as is everything up to the next
 // terminator. A file with no items returns an empty, non-nil slice.
@@ -120,9 +124,20 @@ func (p *parser) structure(line, next string) {
 func (p *parser) content(line, next string) {
 	switch p.mode {
 	case modeMeta:
-		p.mode = modeBody
+		// Blank lines between the header and the metadata are
+		// skipped. Once a metadata line has been read the block is
+		// contiguous, so the next blank line closes it and separates
+		// it from the body.
+		if strings.TrimSpace(line) == "" {
+			if p.sawMeta {
+				p.mode = modeBody
+			}
 
-		fallthrough
+			return
+		}
+
+		p.mode = modeBody
+		p.body = append(p.body, line)
 	case modeBody:
 		p.body = append(p.body, line)
 	case modeResponse:
@@ -144,11 +159,13 @@ func (p *parser) content(line, next string) {
 func (p *parser) startItem(id, title string) {
 	p.flush()
 	p.cur = &Item{ID: id, Title: title, Responses: []string{}}
-	p.mode = modeMeta
+	p.mode, p.sawMeta = modeMeta, false
 }
 
 // meta records one metadata line of the item in progress.
 func (p *parser) meta(key, value string) {
+	p.sawMeta = true
+
 	switch value = strings.TrimSpace(value); key {
 	case "file":
 		p.cur.File = value

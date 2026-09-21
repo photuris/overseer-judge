@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -122,6 +123,84 @@ func TestParseRoundTwo(t *testing.T) {
 			t.Errorf("%s body swallowed the preamble: %q",
 				it.ID, it.Body)
 		}
+	}
+}
+
+// TestParseRoundThree reads a real review round written by a
+// reviewer who left a blank line between each header and its
+// metadata. The whole metadata block was lost before the spec
+// amendment of 2026-09-21.
+func TestParseRoundThree(t *testing.T) {
+	items := Parse(fixture(t, "round-03.md"))
+	if len(items) != 6 {
+		t.Fatalf("Parse returned %d items, want 6: %+v",
+			len(items), items)
+	}
+
+	wantSeverity := []string{
+		"blocking", "blocking", "minor",
+		"blocking", "blocking", "blocking",
+	}
+	for i, it := range items {
+		wantID := fmt.Sprintf("R1-%02d", i+1)
+		if it.ID != wantID {
+			t.Errorf("item %d is %q, want %q", i, it.ID, wantID)
+		}
+		if it.Severity != wantSeverity[i] {
+			t.Errorf("%s severity = %q, want %q",
+				it.ID, it.Severity, wantSeverity[i])
+		}
+		if it.Status != "resolved" {
+			t.Errorf("%s status = %q, want resolved",
+				it.ID, it.Status)
+		}
+		if !strings.HasPrefix(it.File, "internal/") {
+			t.Errorf("%s file = %q, want an internal/ path",
+				it.ID, it.File)
+		}
+		if strings.Contains(it.Body, "- severity:") {
+			t.Errorf("%s body swallowed its metadata: %q",
+				it.ID, it.Body)
+		}
+		if len(it.Responses) != 1 {
+			t.Errorf("%s has %d responses, want 1: %q",
+				it.ID, len(it.Responses), it.Responses)
+		}
+	}
+}
+
+// TestParseFencedTemplateYieldsNoItem covers the format template near
+// the top of round-03.md: it is a fenced block holding a fake header
+// and fake metadata lines, and must not become an item.
+func TestParseFencedTemplateYieldsNoItem(t *testing.T) {
+	for _, it := range Parse(fixture(t, "round-03.md")) {
+		if strings.Contains(it.Title, "one-line title") {
+			t.Errorf("the fenced template became item %q", it.ID)
+		}
+	}
+}
+
+// TestParseBlankLinesInMetadata pins the two halves of the amended
+// rule: blanks before the block are skipped, and the first blank
+// after a metadata line closes it.
+func TestParseBlankLinesInMetadata(t *testing.T) {
+	items := Parse("### R1-01: t\n\n\n- file: a.go:1\n" +
+		"- severity: minor\n\n- status: open\nbody\n")
+	if len(items) != 1 {
+		t.Fatalf("Parse returned %d items, want 1", len(items))
+	}
+
+	it := items[0]
+	if it.File != "a.go:1" || it.Severity != "minor" {
+		t.Errorf("metadata after blank lines was lost: %+v", it)
+	}
+	if it.Status != "" {
+		t.Errorf("status = %q, want empty: the blank line closed "+
+			"the block", it.Status)
+	}
+	if it.Body != "- status: open\nbody" {
+		t.Errorf("body = %q, want the closed-off line and the text",
+			it.Body)
 	}
 }
 

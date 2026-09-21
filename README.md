@@ -177,7 +177,10 @@ item's answer arrives; a file with no items prints nothing and exits
 
 The parser is fence-aware. A `### R9-99:` header or a `---` line
 inside a fenced code block is body text, not a new item, so a finding
-that quotes a review round does not split into two.
+that quotes a review round does not split into two. The `- file:`,
+`- severity:`, and `- status:` lines may sit a blank line below the
+header, as reviewers write them; the block itself is contiguous, and
+the first blank line after it starts the body.
 
 `style_only` is a probability: at 1.0 the finding is taste and nothing
 the program does would change. Each response gets one of five kinds,

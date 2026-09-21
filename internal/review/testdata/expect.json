@@ -7,6 +7,14 @@
     "R6-05": {"style_only": false, "responses": ["question"]},
     "R6-06": {"style_only": false, "responses": ["concern", "fixed"]}
   },
+  "round-03.md": {
+    "R1-01": {"style_only": false, "responses": ["fixed"]},
+    "R1-02": {"style_only": false, "responses": ["fixed"]},
+    "R1-03": {"style_only": false, "responses": ["fixed"]},
+    "R1-04": {"style_only": false, "responses": ["fixed"]},
+    "R1-05": {"style_only": false, "responses": ["fixed"]},
+    "R1-06": {"style_only": false, "responses": ["fixed"]}
+  },
   "round-02.md": {
     "R1-01": {"style_only": false, "responses": ["fixed"]},
     "R1-02": {"style_only": true, "responses": []},
