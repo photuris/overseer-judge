@@ -41,9 +41,24 @@ type globals struct {
 	timeout  time.Duration
 	logLevel string
 
-	cfg    config.Config
-	log    *slog.Logger
+	cfg config.Config
+	log *slog.Logger
+	// apiKey is the resolved key, recorded by client() so the
+	// redactor can strip it from diagnostics. It stays empty until a
+	// request is about to be made.
+	apiKey string
 	client func() (*jev.Client, error)
+}
+
+// redact removes the resolved API key from s, so an upstream
+// diagnostic that echoes the credential cannot reach stderr. It is
+// safe to call before the key has been loaded.
+func (g *globals) redact(s string) string {
+	if g.apiKey == "" {
+		return s
+	}
+
+	return strings.ReplaceAll(s, g.apiKey, "[redacted]")
 }
 
 // effectiveModel returns --model if set, else the configured default.
@@ -79,10 +94,12 @@ func Run(
 	stdin io.Reader,
 	stdout, stderr io.Writer,
 ) int {
+	var g globals
+
 	if len(args) == 0 {
 		writeTopHelp(stderr)
 
-		return reportError(stderr, usagef("no verb given"))
+		return reportError(stderr, usagef("no verb given"), g.redact)
 	}
 
 	switch args[0] {
@@ -100,13 +117,23 @@ func Run(
 	if cmd == nil {
 		writeTopHelp(stderr)
 
-		return reportError(stderr, usagef("unknown verb %q", args[0]))
+		return reportError(
+			stderr, usagef("unknown verb %q", args[0]), g.redact,
+		)
 	}
 
 	if err := runCommand(
-		ctx, *cmd, args[1:], stdin, stdout, stderr,
+		ctx, &g, *cmd, args[1:], stdin, stdout, stderr,
 	); err != nil {
-		return reportError(stderr, err)
+		// Backstop: once the root context is cancelled, the verb's
+		// own error is whatever it happened to reach first. Every
+		// path -- body read, drain, backoff sleep -- reports the
+		// interrupt instead.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			err = &interruptedError{Err: ctxErr}
+		}
+
+		return reportError(stderr, err, g.redact)
 	}
 
 	return exitOK
@@ -116,13 +143,12 @@ func Run(
 // it.
 func runCommand(
 	ctx context.Context,
+	g *globals,
 	cmd command,
 	args []string,
 	stdin io.Reader,
 	stdout, stderr io.Writer,
 ) error {
-	var g globals
-
 	fs := flag.NewFlagSet(
 		"overseer-judge "+cmd.name, flag.ContinueOnError,
 	)
@@ -130,7 +156,7 @@ func runCommand(
 	// parse error's message travels in the error record instead.
 	fs.SetOutput(io.Discard)
 	fs.Usage = func() {}
-	addGlobals(fs, &g)
+	addGlobals(fs, g)
 	cmd.flags(fs)
 
 	if err := fs.Parse(args); err != nil {
@@ -150,14 +176,18 @@ func runCommand(
 	}
 
 	g.cfg = config.Load()
+	// g.redact is a method on g, so the handler sees the key as soon
+	// as client() resolves it, although the logger is built first.
 	g.log = slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{
-		Level: level,
+		Level:       level,
+		ReplaceAttr: redactAttr(g.redact),
 	}))
 	g.client = func() (*jev.Client, error) {
 		key, err := config.Key(keyFile)
 		if err != nil {
 			return nil, err
 		}
+		g.apiKey = key
 
 		return jev.New(
 			&http.Client{Timeout: g.timeout},
@@ -165,7 +195,22 @@ func runCommand(
 		), nil
 	}
 
-	return cmd.run(ctx, &g, fs.Args(), stdin, stdout)
+	return cmd.run(ctx, g, fs.Args(), stdin, stdout)
+}
+
+// redactAttr returns a slog.HandlerOptions.ReplaceAttr that runs
+// redact over every string-valued attribute. slog passes the built-in
+// message attribute through here too, so both are covered.
+func redactAttr(
+	redact func(string) string,
+) func([]string, slog.Attr) slog.Attr {
+	return func(_ []string, a slog.Attr) slog.Attr {
+		if a.Value.Kind() == slog.KindString {
+			a.Value = slog.StringValue(redact(a.Value.String()))
+		}
+
+		return a
+	}
 }
 
 // ── Help ────────────────────────────────────────────────────────────────────

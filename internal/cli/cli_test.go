@@ -1,10 +1,13 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +15,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fixedResponse is the body the success-golden server returns.
@@ -578,5 +582,208 @@ func TestEveryFailureEndsWithOneErrorRecord(t *testing.T) {
 				t.Error("the last stderr line is not an error record")
 			}
 		})
+	}
+}
+
+// ── Round 2 fixes ───────────────────────────────────────────────────────────
+
+// rawServer serves one hand-written HTTP response on a local socket,
+// so a test can send a malformed head or stall with bytes still
+// outstanding. It returns the base URL and a channel closed once the
+// response bytes have been written.
+func rawServer(t *testing.T, head, body string) (string, <-chan struct{}) {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+
+	done := make(chan struct{})
+	sent := make(chan struct{})
+	t.Cleanup(func() {
+		close(done)
+		_ = ln.Close()
+	})
+
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+
+		// Consume the request head so the client's write completes.
+		br := bufio.NewReader(conn)
+		for {
+			line, err := br.ReadString('\n')
+			if err != nil || line == "\r\n" {
+				break
+			}
+		}
+
+		_, _ = io.WriteString(conn, head)
+		_, _ = io.WriteString(conn, body)
+		close(sent)
+
+		// Hold the connection open so the client stalls.
+		<-done
+	}()
+
+	return "http://" + ln.Addr().String(), sent
+}
+
+func TestInterruptDuringDrainReportsInterrupted(t *testing.T) {
+	// The reviewer's recipe: 422 declaring 1000 bytes, 500 sent, then
+	// a stall. readErrBody takes its 500 diagnostic bytes and the
+	// drain blocks on the rest, after the RequestError was chosen.
+	url, sent := rawServer(t,
+		"HTTP/1.1 422 Unprocessable Entity\r\n"+
+			"Content-Length: 1000\r\n\r\n",
+		strings.Repeat("x", 500))
+
+	withKey(t, "sekret")
+	t.Setenv("TYPESAFE_BASE_URL", url)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var out, errOut bytes.Buffer
+	codes := make(chan int, 1)
+	go func() {
+		codes <- Run(
+			ctx,
+			[]string{"raw", "--input", "-", "--log-level", "debug"},
+			strings.NewReader(validRequest), &out, &errOut,
+		)
+	}()
+
+	<-sent
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case code := <-codes:
+		if code != exitInterrupt {
+			t.Errorf("code = %d, want %d (stderr %s)",
+				code, exitInterrupt, errOut.String())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run did not return after cancellation")
+	}
+
+	if ty := errType(t, errOut.String()); ty != "interrupted" {
+		t.Errorf("error type = %q, want interrupted", ty)
+	}
+	if out.String() != "" {
+		t.Errorf("stdout = %q, want empty", out.String())
+	}
+}
+
+func TestInterruptDuringBodyDrainOn200(t *testing.T) {
+	// The same defect on the 200 path: invalid JSON is read, the
+	// ResponseError is chosen, then the drain blocks.
+	url, sent := rawServer(t,
+		"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n",
+		"x"+strings.Repeat(" ", 499))
+
+	withKey(t, "sekret")
+	t.Setenv("TYPESAFE_BASE_URL", url)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var out, errOut bytes.Buffer
+	codes := make(chan int, 1)
+	go func() {
+		codes <- Run(
+			ctx, []string{"raw", "--input", "-"},
+			strings.NewReader(validRequest), &out, &errOut,
+		)
+	}()
+
+	<-sent
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case code := <-codes:
+		if code != exitInterrupt {
+			t.Errorf("code = %d, want %d (stderr %s)",
+				code, exitInterrupt, errOut.String())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run did not return after cancellation")
+	}
+
+	if ty := errType(t, errOut.String()); ty != "interrupted" {
+		t.Errorf("error type = %q, want interrupted", ty)
+	}
+}
+
+func TestMalformedContentLengthDoesNotLeakKey(t *testing.T) {
+	// The reviewer's R1-06 residual: the key reaches stderr through
+	// an HTTP parser error, which carries upstream text but must keep
+	// its NetworkError type and wrapped cause.
+	const key = "round2-fake-token"
+
+	url, _ := rawServer(t,
+		"HTTP/1.1 200 OK\r\nContent-Length: "+key+"\r\n\r\n", "")
+
+	withKey(t, key)
+	t.Setenv("TYPESAFE_BASE_URL", url)
+
+	got := invoke(t, validRequest,
+		"raw", "--log-level", "debug", "--input", "-")
+	if got.code != exitNetwork {
+		t.Errorf("code = %d, want %d (stderr %s)",
+			got.code, exitNetwork, got.stderr)
+	}
+	if ty := errType(t, got.stderr); ty != "network" {
+		t.Errorf("error type = %q, want network", ty)
+	}
+	if strings.Contains(got.stdout, key) {
+		t.Errorf("stdout leaks the key: %q", got.stdout)
+	}
+	if strings.Contains(got.stderr, key) {
+		t.Errorf("stderr leaks the key: %q", got.stderr)
+	}
+	if !strings.Contains(got.stderr, "[redacted]") {
+		t.Errorf("stderr lacks the placeholder: %q", got.stderr)
+	}
+}
+
+func TestRedactAttr(t *testing.T) {
+	g := &globals{apiKey: "sekret"}
+	fn := redactAttr(g.redact)
+
+	t.Run("string attribute", func(t *testing.T) {
+		got := fn(nil, slog.String("body", "Bearer sekret echoed"))
+		if got.Value.String() != "Bearer [redacted] echoed" {
+			t.Errorf("value = %q", got.Value.String())
+		}
+	})
+
+	t.Run("message", func(t *testing.T) {
+		got := fn(nil, slog.String(slog.MessageKey, "sent sekret"))
+		if strings.Contains(got.Value.String(), "sekret") {
+			t.Errorf("message leaks the key: %q", got.Value.String())
+		}
+	})
+
+	t.Run("non-string attribute is untouched", func(t *testing.T) {
+		got := fn(nil, slog.Int("bytes", 7))
+		if got.Value.Kind() != slog.KindInt64 ||
+			got.Value.Int64() != 7 {
+			t.Errorf("value = %v", got.Value)
+		}
+	})
+}
+
+func TestRedactBeforeKeyIsResolved(t *testing.T) {
+	var g globals
+	if got := g.redact("nothing yet"); got != "nothing yet" {
+		t.Errorf("redact = %q, want the input unchanged", got)
+	}
+
+	g.apiKey = "sekret"
+	if got := g.redact("a sekret"); got != "a [redacted]" {
+		t.Errorf("redact = %q", got)
 	}
 }

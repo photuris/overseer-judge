@@ -34,6 +34,21 @@ type usageError struct {
 // Error implements error.
 func (e *usageError) Error() string { return e.Message }
 
+// interruptedError reports that the root context was cancelled. Run
+// substitutes it for whatever error a verb returned first, so an
+// interrupt is classified the same way on every path.
+type interruptedError struct {
+	Err error
+}
+
+// Error implements error.
+func (e *interruptedError) Error() string {
+	return "interrupted: " + e.Err.Error()
+}
+
+// Unwrap returns the context error that cancelled the command.
+func (e *interruptedError) Unwrap() error { return e.Err }
+
 // usagef returns a usageError with a formatted message.
 func usagef(format string, args ...any) error {
 	return &usageError{Message: fmt.Sprintf(format, args...)}
@@ -58,6 +73,7 @@ func classify(err error) (errorBody, int) {
 	body := errorBody{Type: "unknown", Message: err.Error()}
 
 	var (
+		interrupt *interruptedError
 		usage     *usageError
 		auth      *jev.AuthError
 		request   *jev.RequestError
@@ -68,6 +84,10 @@ func classify(err error) (errorBody, int) {
 	)
 
 	switch {
+	case errors.As(err, &interrupt):
+		body.Type = "interrupted"
+
+		return body, exitInterrupt
 	case errors.As(err, &usage):
 		body.Type = "usage"
 
@@ -117,9 +137,15 @@ func codeFor(err error) int {
 }
 
 // reportError writes the error record as the last stderr line and
-// returns the exit code for err.
-func reportError(stderr io.Writer, err error) int {
+// returns the exit code for err. redact strips the resolved API key
+// from the message, so an upstream diagnostic that echoes the
+// credential cannot escape through any error path.
+func reportError(
+	stderr io.Writer, err error, redact func(string) string,
+) int {
 	body, code := classify(err)
+	body.Message = redact(body.Message)
+
 	if encErr := json.NewEncoder(stderr).Encode(
 		errorRecord{Error: body},
 	); encErr != nil {
