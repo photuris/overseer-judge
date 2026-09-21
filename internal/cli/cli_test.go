@@ -490,13 +490,48 @@ const sessionVerdict = `{"model":"m9","answers":{` +
 	`"coherent":{"type":"noul","noul":0.9}},` +
 	`"usage":{"input_tokens":1,"output_tokens":1}}`
 
-// TestSessionRequestParity covers R3-02: the body the server receives
+// TestSessionRequestParity covers R3-02, extended by R7-01 to every
+// agent kind with a real capture: the body the server receives
 // carries the cleaned tail, the extracted input line, the agent kind,
-// and the model override -- and --dry-run prints exactly that body.
+// and the model override; the verdict echoes the same input line; and
+// --dry-run prints exactly the body that was sent.
 func TestSessionRequestParity(t *testing.T) {
-	fixture := filepath.Join(
-		"..", "session", "testdata", "unsubmitted-01.txt",
-	)
+	tests := []struct {
+		kind, fixture, wantInput string
+	}{
+		{
+			kind:      "claude",
+			fixture:   "unsubmitted-01.txt",
+			wantInput: "go ahead and stub resources/tmux.md",
+		},
+		{
+			kind:      "pi",
+			fixture:   "unsubmitted-04.txt",
+			wantInput: "add a regression test for the empty case",
+		},
+		{kind: "pi", fixture: "idle-05.txt", wantInput: ""},
+		{
+			kind:      "opencode",
+			fixture:   "unsubmitted-03.txt",
+			wantInput: "refactor the parser to use a state table",
+		},
+		{kind: "opencode", fixture: "idle-04.txt", wantInput: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.kind+"/"+tt.fixture, func(t *testing.T) {
+			checkSessionParity(t, tt.kind, tt.fixture, tt.wantInput)
+		})
+	}
+}
+
+// checkSessionParity runs the session verb against a local server for
+// one fixture and agent kind, and checks the request, the verdict,
+// and the --dry-run body against each other.
+func checkSessionParity(t *testing.T, kind, name, wantInput string) {
+	t.Helper()
+
+	fixture := filepath.Join("..", "session", "testdata", name)
 	raw, err := os.ReadFile(fixture)
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
@@ -518,7 +553,7 @@ func TestSessionRequestParity(t *testing.T) {
 	t.Setenv("TYPESAFE_BASE_URL", srv.URL)
 
 	args := []string{
-		"session", "--input", fixture, "--agent", "claude",
+		"session", "--input", fixture, "--agent", kind,
 		"--model", "m9",
 	}
 
@@ -534,14 +569,24 @@ func TestSessionRequestParity(t *testing.T) {
 	if !ok {
 		t.Fatalf("state is %T", sent["state"])
 	}
-	if state["agent_kind"] != "claude" {
-		t.Errorf("agent_kind = %v, want claude", state["agent_kind"])
+	if state["agent_kind"] != kind {
+		t.Errorf("agent_kind = %v, want %s", state["agent_kind"], kind)
 	}
 	if state["transcript_tail"] != wantTail {
 		t.Errorf("transcript_tail is not session.Clean of the fixture")
 	}
-	if state["input_line"] != "go ahead and stub resources/tmux.md" {
-		t.Errorf("input_line = %v", state["input_line"])
+	if state["input_line"] != wantInput {
+		t.Errorf("sent input_line = %q, want %q",
+			state["input_line"], wantInput)
+	}
+
+	var verdict session.Verdict
+	if err := json.Unmarshal([]byte(got.stdout), &verdict); err != nil {
+		t.Fatalf("stdout %q is not a verdict: %v", got.stdout, err)
+	}
+	if verdict.InputLine != wantInput {
+		t.Errorf("verdict input_line = %q, want %q",
+			verdict.InputLine, wantInput)
 	}
 
 	dry := invoke(t, "", append(args, "--dry-run")...)
