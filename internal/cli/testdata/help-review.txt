@@ -1,0 +1,21 @@
+overseer-judge review [flags] <path|->
+
+type each item and response in an overseer review round file
+
+Output: JSON Lines, one object per item: id, severity, style_only, responses, model, usage. --pretty is rejected: a record stays on one line.
+
+Flags:
+  -dry-run
+    	print the request that would be sent and exit 0
+  -log-level string
+    	stderr diagnostics: debug, info, warn, error (default "warn")
+  -model string
+    	Jev model (default from TYPESAFE_DEFAULT_MODEL)
+  -pretty
+    	indent JSON output
+  -timeout duration
+    	timeout for each HTTP attempt (default 10s)
+
+Example:
+  overseer-judge review .overseer/reviews/round-04.md |
+    jq -c 'select(.style_only > 0.5)'

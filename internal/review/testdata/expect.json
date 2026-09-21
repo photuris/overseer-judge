@@ -1,0 +1,15 @@
+{
+  "round-01.md": {
+    "R6-01": {"style_only": false, "responses": ["fixed"]},
+    "R6-02": {"style_only": true, "responses": ["agree"]},
+    "R6-03": {"style_only": false, "responses": ["evidence"]},
+    "R6-04": {"style_only": false, "responses": ["concern"]},
+    "R6-05": {"style_only": false, "responses": ["question"]},
+    "R6-06": {"style_only": false, "responses": ["concern", "fixed"]}
+  },
+  "round-02.md": {
+    "R1-01": {"style_only": false, "responses": ["fixed"]},
+    "R1-02": {"style_only": true, "responses": []},
+    "R1-03": {"style_only": false, "responses": ["evidence"]}
+  }
+}

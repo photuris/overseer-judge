@@ -29,7 +29,9 @@ type command struct {
 // commands is the dispatch table. Each entry is a constructor so a
 // verb's flag targets are fresh per invocation. Later tasks append
 // one line each.
-var commands = []func() command{rawCommand, sessionCommand, taskCommand}
+var commands = []func() command{
+	rawCommand, sessionCommand, taskCommand, reviewCommand,
+}
 
 // lookup returns the command named name, or nil.
 func lookup(name string) *command {

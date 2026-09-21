@@ -29,10 +29,13 @@ overseer-judge --help | --version
   raw      send an arbitrary Jev request read from --input
   session  classify an agent pane's transcript tail read from --input
   task     lint an overseer task file for spec defects
+  review   type each item and response in an overseer review round file
 ```
 
 All flags follow the verb. Every verb accepts `--pretty`, `--dry-run`,
-`--model`, `--timeout`, `--log-level`, and `-h`.
+`--model`, `--timeout`, `--log-level`, and `-h`. `review` is the one
+exception: it rejects `--pretty`, because its output is JSON Lines and
+a record stays on one line.
 
 `raw` is the escape hatch. It passes any request body through the
 authenticated client, so a new question set needs no release. Run
@@ -154,6 +157,51 @@ model nothing to judge, so no request is made: the report carries the
 static findings alone, `judgments`, `acceptance`, and `model` are
 absent, and
 `--dry-run` prints `{"method":"","path":"","body":null,"static":[…]}`.
+
+### `review`
+
+A review round is a markdown file of findings, each with the
+implementer's replies under it. `review` reads one and types every
+part of it: whether the finding is style only, and what each reply
+does about it.
+
+```sh
+overseer-judge review .overseer/reviews/round-04.md |
+  jq -c 'select(.style_only > 0.5)'
+```
+
+The path is positional and comes after the flags. `-` reads the file
+from stdin. Output is JSON Lines, one object per item, written as each
+item's answer arrives; a file with no items prints nothing and exits
+0. `--pretty` is a usage error here.
+
+The parser is fence-aware. A `### R9-99:` header or a `---` line
+inside a fenced code block is body text, not a new item, so a finding
+that quotes a review round does not split into two.
+
+`style_only` is a probability: at 1.0 the finding is taste and nothing
+the program does would change. Each response gets one of five kinds,
+classified by what the reply *does*, not by whether it is right, which
+stays the overseer's call:
+
+| Kind | The reply |
+|------|-----------|
+| `fixed`    | claims a change and names where or how |
+| `evidence` | disputes the finding, citing something checkable |
+| `concern`  | disputes it by argument alone |
+| `question` | asks the reviewer for more information |
+| `agree`    | accepts it without claiming a fix yet |
+
+```json
+{"id":"R6-01","severity":"medium","style_only":0.04,
+ "responses":[{"kind":"fixed","confidence":0.91,
+ "probabilities":{"fixed":0.91,"evidence":0.06}}],
+ "model":"jev-latest","usage":{"input_tokens":880,"output_tokens":7}}
+```
+
+One request goes out per item, sequentially; the first failure aborts
+the run, so a partial round can reach stdout before the error record
+reaches stderr.
 
 ## Configuration
 

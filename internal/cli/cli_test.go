@@ -103,6 +103,8 @@ func TestHelpSnapshots(t *testing.T) {
 		{"session verb", []string{"session", "--help"},
 			"help-session.txt"},
 		{"task verb", []string{"task", "--help"}, "help-task.txt"},
+		{"review verb", []string{"review", "--help"},
+			"help-review.txt"},
 	}
 
 	for _, tt := range tests {
@@ -545,6 +547,101 @@ func TestTaskRequestParity(t *testing.T) {
 	) {
 		t.Errorf("--dry-run body differs from the request sent:"+
 			"\n dry %v\nsent %v", body, sent)
+	}
+}
+
+// ── review request parity ───────────────────────────────────────────────────
+
+// reviewAnswers is the body the review parity server returns. Every
+// item in round-02.md has at most one response.
+const reviewAnswers = `{"model":"jev-1","answers":{` +
+	`"style_only":{"type":"noul","noul":0.11},` +
+	`"response_0":{"type":"choice","choice":"fixed",` +
+	`"confidence":0.9,"probabilities":{"fixed":0.9}}},` +
+	`"usage":{"input_tokens":700,"output_tokens":4}}`
+
+// TestReviewRequestParity pins the carry-forward rule: the bodies the
+// server receives are exactly the ones --dry-run prints, one per
+// item, in order.
+func TestReviewRequestParity(t *testing.T) {
+	path := filepath.Join(
+		"..", "review", "testdata", "round-02.md",
+	)
+
+	var sent []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			sent = append(sent, body)
+			_, _ = io.WriteString(w, reviewAnswers)
+		},
+	))
+	defer srv.Close()
+
+	withKey(t, "sekret")
+	t.Setenv("TYPESAFE_BASE_URL", srv.URL)
+
+	got := invoke(t, "", "review", "--model", "m9", path)
+	if got.code != 0 {
+		t.Fatalf("code = %d, stderr = %s", got.code, got.stderr)
+	}
+
+	lines := strings.Split(strings.TrimRight(got.stdout, "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("stdout has %d lines, want 3:\n%s",
+			len(lines), got.stdout)
+	}
+	if len(sent) != 3 {
+		t.Fatalf("server saw %d requests, want 3", len(sent))
+	}
+	for i, want := range []string{"R1-01", "R1-02", "R1-03"} {
+		if id := dryRunBody(t, lines[i])["id"]; id != want {
+			t.Errorf("line %d is for %v, want %s", i, id, want)
+		}
+	}
+
+	dry := invoke(t, "", "review", "--model", "m9", "--dry-run", path)
+	if dry.code != 0 {
+		t.Fatalf("dry-run code = %d, stderr = %s",
+			dry.code, dry.stderr)
+	}
+
+	dryLines := strings.Split(
+		strings.TrimRight(dry.stdout, "\n"), "\n",
+	)
+	if len(dryLines) != len(sent) {
+		t.Fatalf("--dry-run printed %d records, %d were sent",
+			len(dryLines), len(sent))
+	}
+	for i, line := range dryLines {
+		if body := dryRunBody(t, line)["body"]; !reflect.DeepEqual(
+			body, sent[i],
+		) {
+			t.Errorf("item %d: --dry-run body differs from the "+
+				"request sent:\n dry %v\nsent %v",
+				i, body, sent[i])
+		}
+	}
+}
+
+func TestReviewRejectsPretty(t *testing.T) {
+	noKey(t)
+
+	path := filepath.Join(
+		"..", "review", "testdata", "round-02.md",
+	)
+
+	got := invoke(t, "", "review", "--pretty", "--dry-run", path)
+	if got.code != exitUsage {
+		t.Errorf("code = %d, want %d (stderr %s)",
+			got.code, exitUsage, got.stderr)
+	}
+	if ty := errType(t, got.stderr); ty != "usage" {
+		t.Errorf("error type = %q, want usage", ty)
+	}
+	if got.stdout != "" {
+		t.Errorf("stdout = %q, want empty", got.stdout)
 	}
 }
 
