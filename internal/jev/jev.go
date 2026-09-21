@@ -5,18 +5,26 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
 // Path is the System One endpoint, relative to the base URL.
 const Path = "/v1/systemone"
 
-// maxErrBody caps how much of an error response body is kept.
-const maxErrBody = 500
+// maxErrBody caps how much of an error response body is kept for
+// diagnostics. drainLimit caps how much of a body is discarded before
+// closing it, so the connection can be reused.
+const (
+	maxErrBody = 500
+	drainLimit = 1 << 16
+)
 
 // retryWaits are the waits before the second and third attempts.
 var retryWaits = []time.Duration{500 * time.Millisecond, time.Second}
@@ -259,20 +267,18 @@ func (c *Client) attempt(
 	if err != nil {
 		return nil, &NetworkError{Err: err}
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer drainClose(resp.Body)
 
 	if resp.StatusCode == http.StatusOK {
-		var out Response
-		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-			return nil, &ResponseError{
-				Message: "decode body: " + err.Error(),
-			}
+		out, err := decodeResponse(resp.Body)
+		if err != nil {
+			return nil, c.bodyError(ctx, err)
 		}
 
-		return &out, nil
+		return out, nil
 	}
 
-	msg := readErrBody(resp.Body)
+	msg := c.redact(readErrBody(resp.Body))
 
 	switch {
 	case resp.StatusCode == http.StatusUnauthorized:
@@ -288,6 +294,137 @@ func (c *Client) attempt(
 			Status: resp.StatusCode, Message: msg,
 		}
 	}
+}
+
+// drainClose discards up to drainLimit bytes of whatever remains in
+// body and then closes it, so the connection can be reused.
+func drainClose(body io.ReadCloser) {
+	_, _ = io.Copy(io.Discard, io.LimitReader(body, drainLimit))
+	_ = body.Close()
+}
+
+// decodeResponse reads exactly one System One response object from r.
+// The body must be a lone JSON object whose "answers" member is a
+// non-null object, followed by EOF. Every content violation is
+// returned as a *ResponseError; a read failure is returned unwrapped
+// so the caller can classify it.
+func decodeResponse(r io.Reader) (*Response, error) {
+	dec := json.NewDecoder(r)
+
+	var raw json.RawMessage
+	if err := dec.Decode(&raw); err != nil {
+		if isReadFailure(err) {
+			return nil, err
+		}
+
+		return nil, &ResponseError{
+			Message: "decode body: " + err.Error(),
+		}
+	}
+
+	if err := requireEOF(dec); err != nil {
+		return nil, err
+	}
+
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &members); err != nil {
+		return nil, &ResponseError{
+			Message: "body is not a JSON object",
+		}
+	}
+	if members == nil {
+		return nil, &ResponseError{Message: "body is null"}
+	}
+
+	answers, ok := members["answers"]
+	if !ok {
+		return nil, &ResponseError{Message: `body has no "answers"`}
+	}
+
+	var out Response
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, &ResponseError{
+			Message: "decode body: " + err.Error(),
+		}
+	}
+	if out.Answers == nil {
+		return nil, &ResponseError{Message: `"answers" is ` +
+			answersShape(answers)}
+	}
+
+	return &out, nil
+}
+
+// answersShape names why an "answers" member yielded no map, for the
+// error message.
+func answersShape(answers json.RawMessage) string {
+	if string(answers) == "null" {
+		return "null"
+	}
+
+	return "not an object"
+}
+
+// requireEOF reports a *ResponseError unless dec holds nothing but
+// trailing whitespace.
+func requireEOF(dec *json.Decoder) error {
+	var rest json.RawMessage
+	err := dec.Decode(&rest)
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	if err != nil && isReadFailure(err) {
+		return err
+	}
+
+	return &ResponseError{
+		Message: "body holds more than one JSON value",
+	}
+}
+
+// isReadFailure reports whether err came from the transport or a
+// cancelled context rather than from the body's content.
+func isReadFailure(err error) bool {
+	if errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+
+	var netErr net.Error
+
+	return errors.As(err, &netErr)
+}
+
+// bodyError classifies a failure raised while reading a 200 body. A
+// transport failure, timeout, or cancelled context is a NetworkError
+// so it keeps its exit code; invalid content stays a ResponseError.
+func (c *Client) bodyError(ctx context.Context, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return &NetworkError{Err: ctxErr}
+	}
+	if isReadFailure(err) {
+		return &NetworkError{Err: err}
+	}
+
+	var respErr *ResponseError
+	if errors.As(err, &respErr) {
+		respErr.Message = c.redact(respErr.Message)
+
+		return respErr
+	}
+
+	return &ResponseError{Message: c.redact(err.Error())}
+}
+
+// redact replaces every occurrence of the configured API key in s
+// with a placeholder, so an upstream diagnostic that echoes the
+// credential cannot reach an error value, a log record, or a stream.
+func (c *Client) redact(s string) string {
+	if c.apiKey == "" {
+		return s
+	}
+
+	return strings.ReplaceAll(s, c.apiKey, "[redacted]")
 }
 
 // readErrBody reads at most maxErrBody bytes of an error body.

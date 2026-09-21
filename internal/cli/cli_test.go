@@ -139,6 +139,9 @@ func TestNoArgsAndUnknownVerb(t *testing.T) {
 		if !strings.Contains(got.stderr, "overseer-judge <verb>") {
 			t.Errorf("stderr lacks the usage line: %q", got.stderr)
 		}
+		if ty := errType(t, got.stderr); ty != "usage" {
+			t.Errorf("error type = %q, want usage", ty)
+		}
 	}
 }
 
@@ -206,6 +209,14 @@ func TestRawUsageErrors(t *testing.T) {
 		{"null body", "null",
 			[]string{"raw", "--dry-run", "--input", "-"}},
 		{"trailing value", "{} trailing",
+			[]string{"raw", "--dry-run", "--input", "-"}},
+		{"trailing bracket", validRequest + "]",
+			[]string{"raw", "--dry-run", "--input", "-"}},
+		{"trailing brace", validRequest + "}",
+			[]string{"raw", "--dry-run", "--input", "-"}},
+		{"trailing bracket and object", validRequest + "] {}",
+			[]string{"raw", "--dry-run", "--input", "-"}},
+		{"two objects", validRequest + " " + validRequest,
 			[]string{"raw", "--dry-run", "--input", "-"}},
 		{"missing questions", `{"state":"hi"}`,
 			[]string{"raw", "--dry-run", "--input", "-"}},
@@ -404,5 +415,168 @@ func TestCodeForInterrupted(t *testing.T) {
 
 	if got := codeFor(ctx.Err()); got != exitInterrupt {
 		t.Errorf("codeFor = %d, want %d", got, exitInterrupt)
+	}
+}
+
+// ── Round 1 fixes ───────────────────────────────────────────────────────────
+
+func TestRawRejectsInvalidResponses(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"null", "null"},
+		{"empty object", "{}"},
+		{"null answers", `{"model":"m","answers":null}`},
+		{"trailing document", fixedResponse + " {}"},
+		{"not json", "not json"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(
+				func(w http.ResponseWriter, _ *http.Request) {
+					_, _ = io.WriteString(w, tt.body)
+				},
+			))
+			defer srv.Close()
+
+			withKey(t, "sekret")
+			t.Setenv("TYPESAFE_BASE_URL", srv.URL)
+
+			got := invoke(t, validRequest, "raw", "--input", "-")
+			if got.code != exitUpstream {
+				t.Errorf("code = %d, want %d (stderr %s)",
+					got.code, exitUpstream, got.stderr)
+			}
+			if ty := errType(t, got.stderr); ty != "response" {
+				t.Errorf("error type = %q, want response", ty)
+			}
+			if got.stdout != "" {
+				t.Errorf("stdout = %q, want empty", got.stdout)
+			}
+		})
+	}
+}
+
+func TestEchoedKeyNeverReachesAnyStream(t *testing.T) {
+	const key = "fake-key-abc123"
+
+	tests := []struct {
+		name   string
+		status int
+	}{
+		{"request error", 422},
+		{"server error", 500},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(
+				func(w http.ResponseWriter, r *http.Request) {
+					// Echo the credential back, as a careless
+					// upstream diagnostic would.
+					w.Header().Set("Retry-After", "0")
+					w.WriteHeader(tt.status)
+					_, _ = io.WriteString(
+						w, "rejected: "+r.Header.Get("Authorization"),
+					)
+				},
+			))
+			defer srv.Close()
+
+			withKey(t, key)
+			t.Setenv("TYPESAFE_BASE_URL", srv.URL)
+
+			got := invoke(t, validRequest,
+				"raw", "--log-level", "debug", "--input", "-")
+			if got.code == 0 {
+				t.Fatal("want a non-zero exit")
+			}
+			if strings.Contains(got.stdout, key) {
+				t.Errorf("stdout leaks the key: %q", got.stdout)
+			}
+			if strings.Contains(got.stderr, key) {
+				t.Errorf("stderr leaks the key: %q", got.stderr)
+			}
+			if !strings.Contains(got.stderr, "[redacted]") {
+				t.Errorf("stderr lacks the placeholder: %q",
+					got.stderr)
+			}
+		})
+	}
+}
+
+func TestEveryFailureEndsWithOneErrorRecord(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+		},
+	))
+	defer srv.Close()
+
+	cases := []struct {
+		name  string
+		stdin string
+		args  []string
+		setup func(t *testing.T)
+	}{
+		{name: "no args", setup: noKey},
+		{
+			name:  "unknown verb",
+			args:  []string{"nope"},
+			setup: noKey,
+		},
+		{
+			name:  "usage",
+			stdin: "null",
+			args:  []string{"raw", "--dry-run", "--input", "-"},
+			setup: noKey,
+		},
+		{
+			name:  "no key",
+			stdin: validRequest,
+			args:  []string{"raw", "--input", "-"},
+			setup: noKey,
+		},
+		{
+			name:  "auth",
+			stdin: validRequest,
+			args:  []string{"raw", "--input", "-"},
+			setup: func(t *testing.T) {
+				withKey(t, "sekret")
+				t.Setenv("TYPESAFE_BASE_URL", srv.URL)
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.setup(t)
+
+			got := invoke(t, tc.stdin, tc.args...)
+			if got.code == 0 {
+				t.Fatalf("code = 0, want non-zero")
+			}
+
+			lines := strings.Split(
+				strings.TrimRight(got.stderr, "\n"), "\n",
+			)
+			records := 0
+			for _, line := range lines {
+				var rec errorRecord
+				if json.Unmarshal([]byte(line), &rec) == nil &&
+					rec.Error.Type != "" {
+					records++
+				}
+			}
+			if records != 1 {
+				t.Errorf("stderr holds %d error records, want 1:\n%s",
+					records, got.stderr)
+			}
+			if errType(t, got.stderr) == "" {
+				t.Error("the last stderr line is not an error record")
+			}
+		})
 	}
 }

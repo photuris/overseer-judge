@@ -480,3 +480,333 @@ func TestChoiceAccessor(t *testing.T) {
 		})
 	}
 }
+
+// ── Response body handling (R1-01, R1-02, R1-03, R1-06) ─────────────────────
+
+// roundTripFunc adapts a function to http.RoundTripper so a test can
+// hand back an exact body.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+// RoundTrip implements http.RoundTripper.
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+// trackingBody records how a response body was consumed.
+type trackingBody struct {
+	r io.Reader
+	// readErr replaces io.EOF once r is exhausted, to simulate a
+	// transport failure part-way through a body.
+	readErr error
+	// hook runs before the replacement error is returned.
+	hook   func()
+	sawEOF bool
+	closed bool
+}
+
+// Read implements io.Reader.
+func (b *trackingBody) Read(p []byte) (int, error) {
+	n, err := b.r.Read(p)
+	if errors.Is(err, io.EOF) {
+		if b.readErr != nil {
+			if b.hook != nil {
+				b.hook()
+			}
+
+			return n, b.readErr
+		}
+		b.sawEOF = true
+	}
+
+	return n, err
+}
+
+// Close implements io.Closer.
+func (b *trackingBody) Close() error {
+	b.closed = true
+
+	return nil
+}
+
+// timeoutErr is a net.Error that reports a timeout.
+type timeoutErr struct{}
+
+func (timeoutErr) Error() string   { return "i/o timeout" }
+func (timeoutErr) Timeout() bool   { return true }
+func (timeoutErr) Temporary() bool { return true }
+
+// stubClient returns a Client whose transport serves the given
+// responses in order, plus the bodies it handed out.
+func stubClient(
+	apiKey string, bodies []*trackingBody, statuses []int,
+) (*Client, *[]*trackingBody) {
+	served := make([]*trackingBody, 0, len(bodies))
+	n := 0
+	hc := &http.Client{Transport: roundTripFunc(
+		func(*http.Request) (*http.Response, error) {
+			i := min(n, len(bodies)-1)
+			n++
+			served = append(served, bodies[i])
+
+			return &http.Response{
+				StatusCode: statuses[min(i, len(statuses)-1)],
+				Header:     http.Header{"Retry-After": {"0"}},
+				Body:       bodies[i],
+			}, nil
+		},
+	)}
+
+	c := New(hc, "http://stub", apiKey, "jev-default")
+	c.sleep = func(context.Context, time.Duration) error { return nil }
+
+	return c, &served
+}
+
+// body returns a trackingBody serving s.
+func body(s string) *trackingBody {
+	return &trackingBody{r: strings.NewReader(s)}
+}
+
+func TestResponseValidity(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		// want is the substring expected in a ResponseError, or "" to
+		// expect success.
+		want string
+	}{
+		{name: "valid", body: okBody},
+		{name: "valid with trailing whitespace", body: okBody + "\n\n "},
+		{
+			name: "null",
+			body: "null",
+			want: "null",
+		},
+		{
+			name: "empty object",
+			body: "{}",
+			want: `no "answers"`,
+		},
+		{
+			name: "null answers",
+			body: `{"model":"m","answers":null}`,
+			want: "null",
+		},
+		{
+			name: "answers is an array",
+			body: `{"model":"m","answers":[]}`,
+			want: "decode body",
+		},
+		{
+			name: "not an object",
+			body: `[1,2]`,
+			want: "not a JSON object",
+		},
+		{
+			name: "trailing document",
+			body: okBody + " {}",
+			want: "more than one JSON value",
+		},
+		{
+			name: "not json",
+			body: "not json",
+			want: "decode body",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := body(tt.body)
+			c, _ := stubClient("k", []*trackingBody{b}, []int{200})
+
+			resp, err := c.AskRaw(context.Background(), []byte(`{}`))
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("AskRaw: %v, want success", err)
+				}
+				if resp.Answers == nil {
+					t.Error("Answers is nil on a valid response")
+				}
+
+				return
+			}
+
+			var e *ResponseError
+			if !errors.As(err, &e) {
+				t.Fatalf("err = %v (%T), want ResponseError", err, err)
+			}
+			if !strings.Contains(e.Message, tt.want) {
+				t.Errorf("message = %q, want it to mention %q",
+					e.Message, tt.want)
+			}
+			if resp != nil {
+				t.Error("a rejected response must not be returned")
+			}
+		})
+	}
+}
+
+func TestBodyReadFailuresKeepTheirType(t *testing.T) {
+	t.Run("timeout", func(t *testing.T) {
+		b := &trackingBody{
+			r:       strings.NewReader(`{"answers":`),
+			readErr: timeoutErr{},
+		}
+		c, _ := stubClient("k", []*trackingBody{b}, []int{200})
+
+		_, err := c.AskRaw(context.Background(), []byte(`{}`))
+		var e *NetworkError
+		if !errors.As(err, &e) {
+			t.Fatalf("err = %v (%T), want NetworkError", err, err)
+		}
+	})
+
+	t.Run("deadline exceeded", func(t *testing.T) {
+		b := &trackingBody{
+			r:       strings.NewReader(`{"answers":`),
+			readErr: context.DeadlineExceeded,
+		}
+		c, _ := stubClient("k", []*trackingBody{b}, []int{200})
+
+		_, err := c.AskRaw(context.Background(), []byte(`{}`))
+		var e *NetworkError
+		if !errors.As(err, &e) {
+			t.Fatalf("err = %v (%T), want NetworkError", err, err)
+		}
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("err = %v, want it to wrap DeadlineExceeded", err)
+		}
+	})
+
+	t.Run("interrupted mid-body", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		b := &trackingBody{
+			r:       strings.NewReader(`{"answers":`),
+			readErr: errors.New("read: connection reset"),
+			hook:    cancel,
+		}
+		c, _ := stubClient("k", []*trackingBody{b}, []int{200})
+
+		_, err := c.AskRaw(ctx, []byte(`{}`))
+		var e *NetworkError
+		if !errors.As(err, &e) {
+			t.Fatalf("err = %v (%T), want NetworkError", err, err)
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("err = %v, want it to wrap context.Canceled", err)
+		}
+	})
+}
+
+func TestBodiesAreDrainedAndClosed(t *testing.T) {
+	// A body longer than one decoded value, so a plain decode leaves
+	// bytes behind.
+	const padded = okBody + "\n" + `{"ignored":true}`
+
+	tests := []struct {
+		name     string
+		bodies   []*trackingBody
+		statuses []int
+	}{
+		{
+			name:     "success",
+			bodies:   []*trackingBody{body(okBody + strings.Repeat(" ", 4096))},
+			statuses: []int{200},
+		},
+		{
+			name:     "decode failure",
+			bodies:   []*trackingBody{body(padded)},
+			statuses: []int{200},
+		},
+		{
+			name: "retry path",
+			bodies: []*trackingBody{
+				body(strings.Repeat("e", 4096)),
+				body(okBody),
+			},
+			statuses: []int{500, 200},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, served := stubClient("k", tt.bodies, tt.statuses)
+
+			_, _ = c.AskRaw(context.Background(), []byte(`{}`))
+
+			if len(*served) != len(tt.bodies) {
+				t.Fatalf("served %d bodies, want %d",
+					len(*served), len(tt.bodies))
+			}
+			for i, b := range *served {
+				if !b.closed {
+					t.Errorf("body %d was not closed", i)
+				}
+				if !b.sawEOF {
+					t.Errorf("body %d was not drained to EOF", i)
+				}
+			}
+		})
+	}
+}
+
+func TestEchoedKeyIsRedacted(t *testing.T) {
+	const key = "fake-key-abc123"
+
+	tests := []struct {
+		name   string
+		status int
+		// attempts is how many bodies the client will consume; a 5xx
+		// is retried, so each attempt needs its own reader.
+		attempts int
+	}{
+		{"request error", 422, 1},
+		{"server error", 500, 3},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			echo := "upstream said: Bearer " + key + " is invalid"
+			bodies := make([]*trackingBody, tt.attempts)
+			for i := range bodies {
+				bodies[i] = body(echo)
+			}
+			c, _ := stubClient(key, bodies, []int{tt.status})
+
+			_, err := c.AskRaw(context.Background(), []byte(`{}`))
+			if err == nil {
+				t.Fatal("AskRaw: want an error")
+			}
+			if strings.Contains(err.Error(), key) {
+				t.Errorf("error %q leaks the API key", err)
+			}
+			if !strings.Contains(err.Error(), "[redacted]") {
+				t.Errorf("error %q lacks the placeholder", err)
+			}
+		})
+	}
+}
+
+func TestEchoedKeyIsRedactedInResponseErrors(t *testing.T) {
+	const key = "fake-key-abc123"
+
+	c, _ := stubClient(
+		key, []*trackingBody{body(`{"answers":` + key)}, []int{200},
+	)
+
+	_, err := c.AskRaw(context.Background(), []byte(`{}`))
+	var e *ResponseError
+	if !errors.As(err, &e) {
+		t.Fatalf("err = %v (%T), want ResponseError", err, err)
+	}
+	if strings.Contains(err.Error(), key) {
+		t.Errorf("error %q leaks the API key", err)
+	}
+}
+
+func TestRedactSkipsEmptyKey(t *testing.T) {
+	c := New(&http.Client{}, "http://stub", "", "jev-default")
+	if got := c.redact("nothing to do"); got != "nothing to do" {
+		t.Errorf("redact = %q", got)
+	}
+}

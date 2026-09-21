@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -113,7 +114,10 @@ func rawBody(r io.Reader, model string) (json.RawMessage, error) {
 	if obj == nil {
 		return nil, usagef("--input must be a JSON object, got null")
 	}
-	if dec.More() {
+	// More() only reports buffered bytes, so a stray "]" or "}" slips
+	// past it. Require a second decode to hit EOF instead.
+	var rest json.RawMessage
+	if err := dec.Decode(&rest); !errors.Is(err, io.EOF) {
 		return nil, usagef(
 			"--input must hold exactly one JSON object",
 		)

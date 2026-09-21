@@ -82,7 +82,7 @@ func Run(
 	if len(args) == 0 {
 		writeTopHelp(stderr)
 
-		return exitUsage
+		return reportError(stderr, usagef("no verb given"))
 	}
 
 	switch args[0] {
@@ -100,7 +100,7 @@ func Run(
 	if cmd == nil {
 		writeTopHelp(stderr)
 
-		return exitUsage
+		return reportError(stderr, usagef("unknown verb %q", args[0]))
 	}
 
 	if err := runCommand(
