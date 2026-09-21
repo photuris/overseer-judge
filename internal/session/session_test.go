@@ -45,6 +45,71 @@ func TestCleanFaintSpans(t *testing.T) {
 	}
 }
 
+// TestCleanFaintColourParameters covers R3-01: a 2 or 22 that is a
+// colour argument must not start or end a faint span.
+func TestCleanFaintColourParameters(t *testing.T) {
+	tests := []struct {
+		name, raw, want string
+	}{
+		{"indexed colour 2", "\x1b[38;5;2mvisible\x1b[0m", "visible"},
+		{
+			name: "rgb colour with a 2 channel",
+			raw:  "\x1b[38;2;100;150;200mvisible\x1b[0m",
+			want: "visible",
+		},
+		{
+			name: "indexed background colour 22",
+			raw:  "\x1b[48;5;22mvisible\x1b[0m",
+			want: "visible",
+		},
+		{
+			name: "colon sub-parameters",
+			raw:  "\x1b[38:2::10:20:30mvisible\x1b[0m",
+			want: "visible",
+		},
+		{
+			name: "indexed colour 22 does not end a faint span",
+			raw:  "\x1b[2mghost\x1b[38;5;22m still ghost\x1b[0mkept",
+			want: "kept",
+		},
+		{
+			name: "a zero rgb channel does not end a faint span",
+			raw:  "\x1b[2mghost\x1b[38;2;0;120;130m still\x1b[0mkept",
+			want: "kept",
+		},
+		{
+			name: "reset then faint stays on",
+			raw:  "\x1b[0;2mghost\x1b[22mkept",
+			want: "kept",
+		},
+		{
+			name: "faint then reset never starts",
+			raw:  "\x1b[2;22mkept",
+			want: "kept",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Clean(tt.raw, 0, 0); got != tt.want {
+				t.Errorf("Clean(%q) = %q, want %q",
+					tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestInputLineIgnoresColouredGhost is R3-01's input-side repro: a
+// colour change inside the ghost suggestion must not end the span and
+// leak the tail of it as typed input.
+func TestInputLineIgnoresColouredGhost(t *testing.T) {
+	const raw = "❯ \x1b[2mghost\x1b[38;5;22m suggestion\x1b[0m"
+
+	if got := InputLine(Clean(raw, 0, 0)); got != "" {
+		t.Errorf("InputLine = %q, want empty", got)
+	}
+}
+
 func TestCleanGhostSuggestionFixture(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("testdata", "idle-03.txt"))
 	if err != nil {
@@ -341,5 +406,93 @@ func TestJudgeRejectsBadAnswers(t *testing.T) {
 				t.Errorf("verdict = %+v, want the zero value", v)
 			}
 		})
+	}
+}
+
+// ── Question wording ────────────────────────────────────────────────────────
+
+// The amended question text, written out here as literals so a
+// change to session.go cannot pass unnoticed. These are
+// deliberately not derived from Questions().
+const (
+	wantStateInstructions = "`transcript_tail` is the most recent terminal " +
+		"output of a coding agent (`agent_kind`) running in a terminal pane. " +
+		"`input_line` is the text currently sitting in the agent's input box, " +
+		"extracted by code (empty string if the box is empty or was not found). " +
+		"Classify what the pane is doing right now, judged by the last few " +
+		"screens of output, giving most weight to the final lines."
+	wantCoherentInstructions = "Is the most recent output in " +
+		"`transcript_tail` coherent, on-task natural language or code, as " +
+		"opposed to repetition loops, mixed-language gibberish, or random " +
+		"tokens?"
+	wantWorking = "The agent is actively producing coherent, on-task output: " +
+		"tool calls, code, file edits, test runs, or prose that advances a " +
+		"task. A spinner, elapsed-time counter, or 'thinking' indicator on " +
+		"screen counts as working. Text in `input_line` does not, by itself, " +
+		"mean the agent is working."
+	wantIdle = "The agent has finished and is waiting for input. `input_line` " +
+		"is empty or holds only the tool's placeholder hint (for example 'Ask " +
+		"Codex to do anything'), and there is no dialog."
+	wantDialog = "A modal question, approval prompt, folder-trust prompt, " +
+		"update notice, usage-limit or rate-limit notice, or any UI that waits " +
+		"for a keypress or choice before the agent can continue."
+	wantUnsubmitted = "`input_line` holds text a person typed (an " +
+		"instruction, question, or partial message, not the tool's placeholder " +
+		"hint), and no spinner, progress line, or tool call shows the agent " +
+		"acting on it. The text has been typed but not sent."
+	wantError = "The agent's work ended with an API error, crash, stack " +
+		"trace, connection failure, or process exit, and it is not continuing."
+	wantDegraded = "The output has become incoherent: the same line or phrase " +
+		"repeating many times, mixed-language token salad, random characters, " +
+		"or text that no longer relates to any task, while the agent appears to " +
+		"keep producing it."
+	wantCoherentTrue = "The latest output reads as purposeful text or code a " +
+		"competent engineer would write."
+	wantCoherentFalse = "The latest output is repetitive, garbled, " +
+		"multilingual salad, or otherwise meaningless."
+)
+
+func TestQuestionWordingIsVerbatim(t *testing.T) {
+	qs := Questions()
+
+	if got := qs["state"].Instructions; got != wantStateInstructions {
+		t.Errorf("state instructions drifted:\n got %q\nwant %q",
+			got, wantStateInstructions)
+	}
+	if got := qs["coherent"].Instructions; got !=
+		wantCoherentInstructions {
+		t.Errorf("coherent instructions drifted:\n got %q\nwant %q",
+			got, wantCoherentInstructions)
+	}
+
+	state, ok := qs["state"].Criteria.(map[string]string)
+	if !ok {
+		t.Fatalf("state criteria is %T", qs["state"].Criteria)
+	}
+	for label, want := range map[string]string{
+		"working":     wantWorking,
+		"idle":        wantIdle,
+		"dialog":      wantDialog,
+		"unsubmitted": wantUnsubmitted,
+		"error":       wantError,
+		"degraded":    wantDegraded,
+	} {
+		if state[label] != want {
+			t.Errorf("state criterion %q drifted:\n got %q\nwant %q",
+				label, state[label], want)
+		}
+	}
+
+	coherent, ok := qs["coherent"].Criteria.(map[string]string)
+	if !ok {
+		t.Fatalf("coherent criteria is %T", qs["coherent"].Criteria)
+	}
+	if coherent["true"] != wantCoherentTrue {
+		t.Errorf("coherent true drifted:\n got %q\nwant %q",
+			coherent["true"], wantCoherentTrue)
+	}
+	if coherent["false"] != wantCoherentFalse {
+		t.Errorf("coherent false drifted:\n got %q\nwant %q",
+			coherent["false"], wantCoherentFalse)
 	}
 }

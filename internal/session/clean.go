@@ -23,11 +23,11 @@ const esc = 0x1b
 // 1. Remove every carriage return.
 //
 // 1a. Remove faint text: every span that starts at an SGR sequence
-// enabling faint (a CSI … m whose parameter list contains 2) and ends
-// at the next SGR sequence whose parameters contain 0 or 22 or are
-// empty, or at end of line, whichever comes first. Claude Code renders
-// its greyed-out prompt suggestion this way; it is not typed input and
-// must not reach the model. This is a no-op on input without escapes.
+// turning faint on and ends at the next one turning it off, or at end
+// of line, whichever comes first. See sgrFaint for how a parameter
+// list is read. Claude Code renders its greyed-out prompt suggestion
+// this way; it is not typed input and must not reach the model. This
+// is a no-op on input without escapes.
 //
 // 2. Strip ANSI escapes: CSI sequences, OSC sequences, and any other
 // two-byte escape sequence.
@@ -68,7 +68,7 @@ func removeFaint(s string) string {
 
 	for i := 0; i < len(s); {
 		n, final, params, ok := csiAt(s, i)
-		if ok && final == 'm' && hasParam(params, "2") {
+		if ok && final == 'm' && sgrFaint(params) == faintOn {
 			i = skipFaint(s, i+n)
 
 			continue
@@ -95,7 +95,7 @@ func skipFaint(s string, i int) int {
 
 			continue
 		}
-		if final == 'm' && endsFaint(params) {
+		if final == 'm' && sgrFaint(params) == faintOff {
 			return i + n
 		}
 		i += n
@@ -104,22 +104,74 @@ func skipFaint(s string, i int) int {
 	return i
 }
 
-// endsFaint reports whether an SGR parameter list turns faint off.
-func endsFaint(params string) bool {
-	return params == "" ||
-		hasParam(params, "0") || hasParam(params, "22")
-}
+// The faint transitions an SGR parameter list can leave behind.
+const (
+	faintOff       = -1
+	faintUnchanged = 0
+	faintOn        = 1
+)
 
-// hasParam reports whether a semicolon-separated SGR parameter list
-// contains want.
-func hasParam(params, want string) bool {
-	for p := range strings.SplitSeq(params, ";") {
-		if p == want {
-			return true
+// sgrFaint walks the semicolon-separated parameters of one CSI … m
+// sequence, left to right, and reports the faint state it leaves
+// behind. An extended-colour selector consumes its own arguments, so
+// the 2 in 38;5;2 or 38;2;r;g;b is a colour value and never turns
+// faint on, and the 22 in 48;5;22 never turns it off. A standalone 2
+// turns faint on; a standalone 0, a 22, or an empty parameter --
+// including the empty list of a bare CSI m -- turns it off.
+func sgrFaint(params string) int {
+	if params == "" {
+		return faintOff
+	}
+
+	fields := strings.Split(params, ";")
+	state := faintUnchanged
+
+	for i := 0; i < len(fields); i++ {
+		// A parameter carrying colon sub-parameters, such as
+		// 38:2::10:20:30, is one whole extended-colour operation.
+		if strings.Contains(fields[i], ":") {
+			continue
+		}
+
+		if n, ok := colourArgs(fields, i); ok {
+			i += n
+
+			continue
+		}
+
+		switch fields[i] {
+		case "2":
+			state = faintOn
+		case "0", "22", "":
+			state = faintOff
 		}
 	}
 
-	return false
+	return state
+}
+
+// colourArgs reports whether fields[i] selects an extended colour
+// and, if so, how many parameters after it the selector consumes. A
+// list that ends before its arguments consumes what is left.
+func colourArgs(fields []string, i int) (int, bool) {
+	switch fields[i] {
+	case "38", "48", "58":
+	default:
+		return 0, false
+	}
+
+	if i+1 >= len(fields) {
+		return 0, true
+	}
+
+	switch fields[i+1] {
+	case "5":
+		return 2, true
+	case "2":
+		return 4, true
+	}
+
+	return 0, true
 }
 
 // csiAt reports whether a complete CSI sequence starts at s[i],

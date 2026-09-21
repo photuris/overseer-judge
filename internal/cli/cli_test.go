@@ -16,6 +16,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"overseer-judge/internal/session"
 )
 
 // fixedResponse is the body the success-golden server returns.
@@ -404,6 +406,82 @@ func TestRawInputFromFile(t *testing.T) {
 	got = invoke(t, "", "raw", "--dry-run", "--input", path+".absent")
 	if got.code != exitUsage {
 		t.Errorf("code = %d, want %d", got.code, exitUsage)
+	}
+}
+
+// ── session request parity ──────────────────────────────────────────────────
+
+// sessionVerdict is the body the session server returns.
+const sessionVerdict = `{"model":"m9","answers":{` +
+	`"state":{"type":"choice","choice":"unsubmitted",` +
+	`"confidence":0.8,"probabilities":{"unsubmitted":0.8}},` +
+	`"coherent":{"type":"noul","noul":0.9}},` +
+	`"usage":{"input_tokens":1,"output_tokens":1}}`
+
+// TestSessionRequestParity covers R3-02: the body the server receives
+// carries the cleaned tail, the extracted input line, the agent kind,
+// and the model override -- and --dry-run prints exactly that body.
+func TestSessionRequestParity(t *testing.T) {
+	fixture := filepath.Join(
+		"..", "session", "testdata", "unsubmitted-01.txt",
+	)
+	raw, err := os.ReadFile(fixture)
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	wantTail := session.Clean(
+		string(raw), session.MaxLines, session.MaxBytes,
+	)
+
+	var sent map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewDecoder(r.Body).Decode(&sent)
+			_, _ = io.WriteString(w, sessionVerdict)
+		},
+	))
+	defer srv.Close()
+
+	withKey(t, "sekret")
+	t.Setenv("TYPESAFE_BASE_URL", srv.URL)
+
+	args := []string{
+		"session", "--input", fixture, "--agent", "claude",
+		"--model", "m9",
+	}
+
+	got := invoke(t, "", args...)
+	if got.code != 0 {
+		t.Fatalf("code = %d, stderr = %s", got.code, got.stderr)
+	}
+
+	if sent["model"] != "m9" {
+		t.Errorf("model = %v, want m9", sent["model"])
+	}
+	state, ok := sent["state"].(map[string]any)
+	if !ok {
+		t.Fatalf("state is %T", sent["state"])
+	}
+	if state["agent_kind"] != "claude" {
+		t.Errorf("agent_kind = %v, want claude", state["agent_kind"])
+	}
+	if state["transcript_tail"] != wantTail {
+		t.Errorf("transcript_tail is not session.Clean of the fixture")
+	}
+	if state["input_line"] != "go ahead and stub resources/tmux.md" {
+		t.Errorf("input_line = %v", state["input_line"])
+	}
+
+	dry := invoke(t, "", append(args, "--dry-run")...)
+	if dry.code != 0 {
+		t.Fatalf("dry-run code = %d, stderr = %s",
+			dry.code, dry.stderr)
+	}
+	if body := dryRunBody(t, dry.stdout)["body"]; !reflect.DeepEqual(
+		body, sent,
+	) {
+		t.Errorf("--dry-run body differs from the request sent:"+
+			"\n dry %v\nsent %v", body, sent)
 	}
 }
 
