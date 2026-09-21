@@ -299,5 +299,4 @@ if ($LASTEXITCODE -ne 0) { throw "judge failed: $LASTEXITCODE" }
 ## Development
 
 See [AGENTS.md](AGENTS.md) for the layout, the test commands, and the
-standard-library-only rule. `.overseer/` holds the run ledger for the
-overseer workflow that builds this tool.
+standard-library-only rule.

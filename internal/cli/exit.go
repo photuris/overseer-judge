@@ -11,7 +11,7 @@ import (
 	"overseer-judge/internal/jev"
 )
 
-// Exit codes, per PLAN.md. 4 and 9 are unused: there are no resources
+// Exit codes, per README.md. 4 and 9 are unused: there are no resources
 // to not-find and no bulk writes.
 const (
 	exitOK        = 0

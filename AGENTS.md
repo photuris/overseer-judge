@@ -4,9 +4,6 @@ A Go CLI that turns overseer judgments into typed JSON verdicts. It
 asks TypeSafe's System One (Jev) model, so the overseer skill can move
 those judgments off an expensive reasoning model.
 
-Read `.overseer/PLAN.md` first. It fixes the design and the task
-order.
-
 ## Layout
 
 ```
@@ -39,7 +36,7 @@ Tests sit beside the code as `*_test.go`. Fixtures live in
 Each judgment's exact question text lives in the package that sends
 it: `internal/session`, `internal/tasklint`, `internal/review`. The
 wording is versioned with the code that sends it, so read the package
-rather than the plan when you need the current text.
+when you need the current text.
 
 Use `--dry-run` to read a request without sending it:
 
@@ -75,6 +72,7 @@ list.
 
 ## `.overseer/`
 
-`.overseer/` is the run ledger for the overseer workflow: `PLAN.md`,
-`STATE.md`, the task files, and the review rounds. Do not edit it
+`.overseer/` is the local run ledger for the overseer workflow:
+`PLAN.md`, `STATE.md`, the task files, and the review rounds. Git
+ignores it, so a fresh clone has none. When one exists, do not edit it
 except the `Result` section of the task you were given.
