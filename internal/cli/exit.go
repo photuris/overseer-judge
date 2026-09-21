@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"io"
 
-	"overseer-judge/internal/config"
-	"overseer-judge/internal/jev"
+	"github.com/photuris/overseer-judge/internal/config"
+	"github.com/photuris/overseer-judge/internal/jev"
 )
 
 // Exit codes, per README.md. 4 and 9 are unused: there are no resources

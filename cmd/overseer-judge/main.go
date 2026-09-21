@@ -7,7 +7,7 @@ import (
 	"os"
 	"os/signal"
 
-	"overseer-judge/internal/cli"
+	"github.com/photuris/overseer-judge/internal/cli"
 )
 
 func main() {

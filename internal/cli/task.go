@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"io"
 
-	"overseer-judge/internal/jev"
-	"overseer-judge/internal/tasklint"
+	"github.com/photuris/overseer-judge/internal/jev"
+	"github.com/photuris/overseer-judge/internal/tasklint"
 )
 
 // taskExample is the example shown in `task --help`. Flags precede

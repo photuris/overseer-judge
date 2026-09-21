@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"overseer-judge/internal/jev"
+	"github.com/photuris/overseer-judge/internal/jev"
 )
 
 // goodResponse answers all three questions.

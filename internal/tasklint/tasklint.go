@@ -5,7 +5,7 @@ package tasklint
 import (
 	"context"
 
-	"overseer-judge/internal/jev"
+	"github.com/photuris/overseer-judge/internal/jev"
 )
 
 // SoundCut is the acceptance score at or above which a task's

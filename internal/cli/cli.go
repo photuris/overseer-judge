@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"overseer-judge/internal/config"
-	"overseer-judge/internal/jev"
+	"github.com/photuris/overseer-judge/internal/config"
+	"github.com/photuris/overseer-judge/internal/jev"
 )
 
 // Version is the tool's version, set at build time.

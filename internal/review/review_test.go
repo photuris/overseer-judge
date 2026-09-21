@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"overseer-judge/internal/jev"
+	"github.com/photuris/overseer-judge/internal/jev"
 )
 
 // fixture reads a testdata file.

@@ -8,6 +8,16 @@ it without reading prose.
 stdout carries data only. Every failure prints one JSON object as the
 last stderr line and exits with a code from the table below.
 
+## Install
+
+```sh
+go install github.com/photuris/overseer-judge/cmd/overseer-judge@latest
+```
+
+Without Go: download the archive for your OS/arch from the
+[latest release](https://github.com/photuris/overseer-judge/releases/latest),
+extract it, and put `overseer-judge` on your `PATH`.
+
 ## Quickstart
 
 ```sh

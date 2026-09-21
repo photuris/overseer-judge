@@ -1,0 +1,34 @@
+version: 2
+
+project_name: overseer-judge
+
+builds:
+  - id: overseer-judge
+    main: ./cmd/overseer-judge
+    binary: overseer-judge
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  disable: true

@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"io"
 
-	"overseer-judge/internal/jev"
-	"overseer-judge/internal/review"
+	"github.com/photuris/overseer-judge/internal/jev"
+	"github.com/photuris/overseer-judge/internal/review"
 )
 
 // reviewExample is the example shown in `review --help`. Flags

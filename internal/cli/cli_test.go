@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"overseer-judge/internal/session"
+	"github.com/photuris/overseer-judge/internal/session"
 )
 
 // fixedResponse is the body the success-golden server returns.

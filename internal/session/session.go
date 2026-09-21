@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"overseer-judge/internal/jev"
+	"github.com/photuris/overseer-judge/internal/jev"
 )
 
 // stateInstructions is the instruction text for the state question.

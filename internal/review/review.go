@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"overseer-judge/internal/jev"
+	"github.com/photuris/overseer-judge/internal/jev"
 )
 
 // styleInstructions is the instruction text for the style_only

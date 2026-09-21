@@ -8,8 +8,8 @@ import (
 	"io"
 	"slices"
 
-	"overseer-judge/internal/jev"
-	"overseer-judge/internal/session"
+	"github.com/photuris/overseer-judge/internal/jev"
+	"github.com/photuris/overseer-judge/internal/session"
 )
 
 // agentKinds are the accepted --agent values.

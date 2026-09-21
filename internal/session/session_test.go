@@ -13,7 +13,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"overseer-judge/internal/jev"
+	"github.com/photuris/overseer-judge/internal/jev"
 )
 
 // goodResponse is a complete, well-formed answer pair.

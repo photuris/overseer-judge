@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"overseer-judge/internal/config"
-	"overseer-judge/internal/jev"
+	"github.com/photuris/overseer-judge/internal/config"
+	"github.com/photuris/overseer-judge/internal/jev"
 )
 
 // liveTimeout bounds each live HTTP attempt. A review item is a
