@@ -12,39 +12,25 @@ last stderr line and exits with a code from the table below.
 
 ### Prebuilt binary
 
-Each release carries one archive per OS and architecture, named
-`overseer-judge_${v}_${os}_${arch}.tar.gz` (Linux and macOS) or
-`overseer-judge_${v}_windows_${arch}.zip`, for `amd64` and `arm64`.
-Linux and Windows binaries are statically linked. macOS binaries
-depend only on the system libraries.
-
-Linux and macOS, into `~/.local/bin`:
+Linux and macOS:
 
 ```sh
-v=$(curl -fsSL https://api.github.com/repos/photuris/overseer-judge/releases/latest | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
-os=$(uname -s | tr '[:upper:]' '[:lower:]'); arch=$(uname -m)
-case $arch in x86_64) arch=amd64;; aarch64|arm64) arch=arm64;; esac
-mkdir -p ~/.local/bin
-curl -fsSL "https://github.com/photuris/overseer-judge/releases/download/v$v/overseer-judge_${v}_${os}_${arch}.tar.gz" | tar -xz -C ~/.local/bin overseer-judge
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/photuris/overseer-judge/releases/latest/download/overseer-judge-installer.sh | sh
 ```
 
-Windows (PowerShell), into `~\.local\bin`; add that directory to your
-`PATH` if it is not there yet:
+Windows (PowerShell):
 
 ```powershell
-$v = (Invoke-RestMethod https://api.github.com/repos/photuris/overseer-judge/releases/latest).tag_name.TrimStart('v')
-$arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
-$tmp = Join-Path $env:TEMP 'overseer-judge'
-Invoke-WebRequest "https://github.com/photuris/overseer-judge/releases/download/v$v/overseer-judge_${v}_windows_${arch}.zip" -OutFile "$tmp.zip"
-Expand-Archive "$tmp.zip" -DestinationPath $tmp -Force
-$bin = Join-Path $HOME '.local\bin'
-New-Item -ItemType Directory -Force $bin | Out-Null
-Copy-Item (Join-Path $tmp 'overseer-judge.exe') $bin
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/photuris/overseer-judge/releases/latest/download/overseer-judge-installer.ps1 | iex"
 ```
 
-Each release also carries `checksums.txt`, the SHA-256 of every
-archive. To verify a download, compare `sha256sum <archive>` (or
-`Get-FileHash <archive>` in PowerShell) with its line in that file.
+Both put the binary in `~/.local/bin` (`%USERPROFILE%\.local\bin` on
+Windows) and add that directory to `PATH` if needed. Check with
+`overseer-judge --version`. Linux and Windows binaries are statically
+linked; macOS binaries depend only on the system libraries. Archives
+named `overseer-judge-<target>.tar.xz` (`.zip` on Windows), each with a
+`.sha256` file, are on the
+[releases page](https://github.com/photuris/overseer-judge/releases/latest).
 
 ### From source
 

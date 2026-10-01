@@ -1,0 +1,22 @@
+[workspace]
+members = ["cargo:."]
+
+# Config for 'dist'
+[dist]
+# The preferred dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.33.0"
+# CI backends to support
+ci = "github"
+# The installers to generate for each app
+installers = ["shell", "powershell"]
+# Target platforms to build apps for (Rust target-triple syntax)
+# Linux builds use musl so the binaries are fully static. Windows
+# binaries link the C runtime statically (dist's msvc-crt-static).
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "aarch64-unknown-linux-musl", "x86_64-unknown-linux-musl", "aarch64-pc-windows-msvc", "x86_64-pc-windows-msvc"]
+# Build every artifact on pull requests (without publishing) so a
+# release can be checked before it is tagged.
+pr-run-mode = "upload"
+# Path that installers should place binaries in
+install-path = "~/.local/bin"
+# Whether to install an updater program
+install-updater = false
