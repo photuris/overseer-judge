@@ -20,3 +20,9 @@ pr-run-mode = "upload"
 install-path = "~/.local/bin"
 # Whether to install an updater program
 install-updater = false
+
+# dist would build Windows on ARM in the cargo-xwin container, whose
+# Rust is older than this crate's rust-version. Cross-compile it on
+# the Windows runner instead, as the x86_64 Windows build does.
+[dist.github-custom-runners]
+aarch64-pc-windows-msvc = "windows-2022"
