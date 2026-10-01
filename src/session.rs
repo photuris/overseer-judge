@@ -459,6 +459,57 @@ mod tests {
         );
     }
 
+    /// Returns pi's labelled rule line: `──`, `label`, then twenty `─`.
+    fn pi_rule(label: &str) -> String {
+        format!("──{label}{}", "─".repeat(20))
+    }
+
+    /// Returns what pi's `activity_hint` and `input_line` read from a
+    /// pane whose rule above `typed` carries `label`.
+    fn pi_reads(label: &str) -> (String, String) {
+        let rule = pi_rule(label);
+        let pane = format!("{rule}\ntyped\n{}", pi_rule(""));
+
+        (
+            activity_hint(AgentKind::Pi, &rule),
+            input_line(AgentKind::Pi, &pane),
+        )
+    }
+
+    #[test]
+    fn should_reject_pi_rule_label_at_25_chars() {
+        for (len, is_rule) in [(24, true), (25, false), (26, false)] {
+            let label = "a".repeat(len);
+
+            let (hint, input) = pi_reads(&label);
+
+            let want = if is_rule {
+                (label.as_str(), "typed")
+            } else {
+                ("", "")
+            };
+            assert_eq!((hint.as_str(), input.as_str()), want, "len {len}");
+        }
+    }
+
+    #[test]
+    fn should_use_go_letter_and_digit_classes_for_pi_labels() {
+        let cases = [
+            ("²", false),
+            ("\u{345}", false),
+            ("Ⅻ", false),
+            ("é", true),
+            ("٣", true),
+        ];
+
+        for (label, is_rule) in cases {
+            let (hint, input) = pi_reads(&format!(" {label} "));
+
+            let want = if is_rule { (label, "typed") } else { ("", "") };
+            assert_eq!((hint.as_str(), input.as_str()), want, "{label:?}");
+        }
+    }
+
     #[test]
     fn should_reject_unknown_state_label() {
         let server = MockServer::start();

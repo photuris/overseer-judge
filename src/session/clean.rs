@@ -6,6 +6,10 @@
 //! can find on screen with certainty: the text in the agent's input
 //! box and the agent's own busy-indicator line.
 
+use std::sync::LazyLock;
+
+use regex::Regex;
+
 use super::AgentKind;
 
 /// How many lines of a cleaned tail are kept.
@@ -37,6 +41,13 @@ const MIN_RULE: usize = 20;
 
 /// How many other runes a labelled rule may carry.
 const MAX_LABEL: usize = 24;
+
+/// Matches one rune a pi rule label may hold: Go's `unicode.IsLetter`
+/// (`L*`), `unicode.IsDigit` (`Nd`), or an ASCII space.
+static LABEL_RUNE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^[\p{L}\p{Nd} ]$")
+        .unwrap_or_else(|_| unreachable!("the pattern is a valid literal"))
+});
 
 /// The prompts agents draw in an empty input box. Text starting with
 /// one of them was not typed by a person.
@@ -503,10 +514,7 @@ fn rules_input(lines: &[&str]) -> Option<String> {
 /// The trimmed line opens with two rule runes and closes with at least
 /// [`MIN_RULE`] of them. Between the runs pi may draw a short label, as
 /// in `── Working ───…`, so up to [`MAX_LABEL`] other runes are allowed,
-/// all letters, digits, or spaces.
-// ponytail: `is_alphabetic`/`is_numeric` are slightly wider than Go's
-// IsLetter/IsDigit (Other_Alphabetic marks, Nl/No numbers); exact parity
-// needs a general-category table if such a label ever shows up.
+/// all [`LABEL_RUNE`] matches.
 fn is_rule(line: &str) -> bool {
     let line = line.trim();
     let tail = line.chars().rev().take_while(|&c| c == RULE).count();
@@ -516,8 +524,8 @@ fn is_rule(line: &str) -> bool {
         && tail >= MIN_RULE
         && label
             .by_ref()
-            .take(MAX_LABEL + 1)
-            .all(|c| c.is_alphabetic() || c.is_numeric() || c == ' ')
+            .take(MAX_LABEL)
+            .all(|c| LABEL_RUNE.is_match(c.encode_utf8(&mut [0; 4])))
         && label.next().is_none()
 }
 

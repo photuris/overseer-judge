@@ -615,10 +615,9 @@ fn same_host(origin: &Uri, url: &Uri) -> bool {
 
 /// Resolves a redirect `location` against the URL that returned it.
 ///
-/// Returns `None` when `location` is empty or the result is not a
-/// valid URI.
-// ponytail: no dot-segment removal; `../x` is sent as is, which servers
-// normalize. Add RFC 3986 section 5.2.4 if a server ever needs it.
+/// Relative and root-relative paths have their dot segments removed;
+/// absolute and scheme-relative locations are used as given. Returns
+/// `None` when `location` is empty or the result is not a valid URI.
 fn resolve(base: &Uri, location: &str) -> Option<Uri> {
     let location = location.split('#').next().unwrap_or_default();
     let scheme = base.scheme_str()?;
@@ -629,19 +628,56 @@ fn resolve(base: &Uri, location: &str) -> Option<Uri> {
         return None;
     } else if location.starts_with("//") {
         format!("{scheme}:{location}")
-    } else if location.starts_with('/') {
-        format!("{scheme}://{authority}{location}")
     } else if location.starts_with('?') {
         format!("{scheme}://{authority}{path}{location}")
     } else if Uri::try_from(location).is_ok_and(|uri| uri.scheme().is_some()) {
         location.to_owned()
     } else {
-        let dir = &path[..=path.rfind('/').unwrap_or_default()];
+        let (target, query) = location
+            .find('?')
+            .map_or((location, ""), |at| location.split_at(at));
+        let merged = if target.starts_with('/') {
+            target.to_owned()
+        } else {
+            format!(
+                "{}{target}",
+                &path[..=path.rfind('/').unwrap_or_default()]
+            )
+        };
 
-        format!("{scheme}://{authority}{dir}{location}")
+        format!(
+            "{scheme}://{authority}{}{query}",
+            remove_dot_segments(&merged)
+        )
     };
 
     Uri::try_from(resolved).ok()
+}
+
+/// Removes `.` and `..` segments from an absolute `path`, as RFC 3986
+/// section 5.2.4 specifies.
+fn remove_dot_segments(path: &str) -> String {
+    let mut out: Vec<&str> = Vec::new();
+    let segments: Vec<&str> = path.split('/').skip(1).collect();
+
+    for (i, segment) in segments.iter().enumerate() {
+        let last = i + 1 == segments.len();
+
+        match *segment {
+            "." if last => out.push(""),
+            "." => {}
+            ".." => {
+                out.pop();
+
+                if last {
+                    out.push("");
+                }
+            }
+            segment => out.push(segment),
+        }
+    }
+
+    format!("/{}", out.join("/"))
 }
 
 /// Wraps a transport error as a final [`Error::Network`].
@@ -1209,6 +1245,31 @@ mod tests {
     }
 
     #[test]
+    fn should_follow_relative_redirects_with_dot_segments() {
+        for (location, target) in
+            [("../final", "/final"), ("./final", "/v1/final")]
+        {
+            let server = MockServer::start();
+            server.mock(|when, then| {
+                when.method(POST).path(PATH);
+                then.status(307).header("Location", location);
+            });
+            let resolved = server.mock(|when, then| {
+                when.method(POST).path(target);
+                then.status(200).body(OK_BODY);
+            });
+            server.mock(|_, then| {
+                then.status(404);
+            });
+
+            let result = client(&server).ask_raw(b"{}");
+
+            assert!(result.is_ok(), "{location}: {result:?}");
+            resolved.assert();
+        }
+    }
+
+    #[test]
     fn should_stop_after_ten_redirects() {
         let server = MockServer::start();
         let mock = server.mock(|when, then| {
@@ -1241,6 +1302,10 @@ mod tests {
     #[case::root_relative("/x?y#z", "http://a:1/x?y")]
     #[case::query("?y", "http://a:1/v1/systemone?y")]
     #[case::relative("final", "http://a:1/v1/final")]
+    #[case::parent("../final", "http://a:1/final")]
+    #[case::current("./final", "http://a:1/v1/final")]
+    #[case::inner_parent("a/../b", "http://a:1/v1/b")]
+    #[case::root_current("/x/./y", "http://a:1/x/y")]
     fn should_resolve_redirect_location(
         #[case] location: &str,
         #[case] want: &str,
