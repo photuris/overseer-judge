@@ -1,6 +1,1 @@
 max_width = 79
-
-# Nightly-only: stable rustfmt warns and skips these, so run
-# `cargo +nightly fmt` to apply them, or group imports by hand.
-group_imports = "StdExternalCrate"
-imports_granularity = "Crate"
