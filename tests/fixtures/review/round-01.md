@@ -111,5 +111,6 @@ place once the batch is idle.
   entry points: `saveMappings` now writes `mappings.staged` and moves
   it in `onBatchIdle`, in `src/shell/editor.cpp:430`. Test:
   `editor_save_during_batch_stages`.
+
 overseer note: this item stays resolved; the first response was
 withdrawn by the implementer.
