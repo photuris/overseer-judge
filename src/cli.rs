@@ -10,13 +10,17 @@ use std::{
     ffi::OsString,
     fs,
     io::{self, Read, Write},
-    iter,
-    sync::atomic::{AtomicBool, Ordering},
+    iter, process,
+    sync::{
+        Mutex, PoisonError,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 
 use clap::{
-    ArgAction, Args, Parser, Subcommand, ValueEnum, builder::PossibleValue,
+    ArgAction, Args, Parser, Subcommand, ValueEnum,
+    builder::{PossibleValue, PossibleValuesParser, TypedValueParser},
     error::ErrorKind,
 };
 use serde::Serialize;
@@ -61,12 +65,46 @@ pub static INTERRUPTED: AtomicBool = AtomicBool::new(false);
 /// is written once.
 pub static REPORTED: AtomicBool = AtomicBool::new(false);
 
-/// Writes the `interrupted` error record to `stderr` unless another
-/// thread already claimed it.
-pub fn report_interrupted(stderr: &mut dyn Write) {
+/// Held across every whole stdout record and every stderr error
+/// record, and by [`interrupt_exit`] until the process is gone, so an
+/// exit can only fall between complete records. Never held across a
+/// read or a request.
+pub static OUTPUT: Mutex<()> = Mutex::new(());
+
+/// Locks [`OUTPUT`], recovering it if a panicking writer poisoned it.
+fn lock_output() -> std::sync::MutexGuard<'static, ()> {
+    OUTPUT.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Marks the process interrupted, waits for any record in flight,
+/// writes the `interrupted` error record to `stderr` unless another
+/// thread already did, and exits 130 still holding [`OUTPUT`], so no
+/// other thread can start a record after it.
+pub fn interrupt_exit(stderr: &mut dyn Write) -> ! {
+    INTERRUPTED.store(true, Ordering::SeqCst);
+
+    let _guard = lock_output();
+
     if !REPORTED.swap(true, Ordering::SeqCst) {
         write_record(stderr, "interrupted", "interrupted", 0);
     }
+
+    process::exit(EXIT_INTERRUPTED)
+}
+
+/// Exits with `code`, or through [`interrupt_exit`] once SIGINT has
+/// been seen. Holds [`OUTPUT`] while exiting, so a handler that is
+/// writing the record finishes it first and one that starts later
+/// never writes.
+pub fn exit(code: i32, stderr: &mut dyn Write) -> ! {
+    let guard = lock_output();
+
+    if INTERRUPTED.load(Ordering::SeqCst) {
+        drop(guard);
+        interrupt_exit(stderr);
+    }
+
+    process::exit(code)
 }
 
 // ── Help text ───────────────────────────────────────────────────────────────
@@ -155,7 +193,8 @@ const VALUE_FLAGS: [&str; 5] =
     after_help = TOP_AFTER_HELP,
     subcommand_required = true,
     disable_help_subcommand = true,
-    propagate_version = true
+    propagate_version = true,
+    args_override_self = true
 )]
 struct Cli {
     /// Flags every verb accepts.
@@ -180,7 +219,7 @@ struct Globals {
         require_equals = true,
         hide_default_value = true,
         hide_possible_values = true,
-        value_parser = clap::value_parser!(bool),
+        value_parser = go_bool(),
     )]
     pretty: bool,
     /// Print the request that would be sent and exit 0
@@ -194,7 +233,7 @@ struct Globals {
         require_equals = true,
         hide_default_value = true,
         hide_possible_values = true,
-        value_parser = clap::value_parser!(bool),
+        value_parser = go_bool(),
     )]
     dry_run: bool,
     /// Jev model (default from TYPESAFE_DEFAULT_MODEL)
@@ -294,22 +333,24 @@ enum Verb {
     #[command(
         about = "send an arbitrary Jev request read from --input",
         long_about = None,
-        after_help = RAW_AFTER_HELP
+        after_help = RAW_AFTER_HELP,
+        args_override_self = true
     )]
     Raw {
         /// Request JSON to send; - reads stdin
-        #[arg(long, value_name = "path|-")]
+        #[arg(long, value_name = "path|-", allow_hyphen_values = true)]
         input: String,
     },
     /// Classify an agent pane's transcript tail read from --input.
     #[command(
         about = "classify an agent pane's transcript tail read from --input",
         long_about = None,
-        after_help = SESSION_AFTER_HELP
+        after_help = SESSION_AFTER_HELP,
+        args_override_self = true
     )]
     Session {
         /// Transcript tail; - reads stdin
-        #[arg(long, value_name = "path|-")]
+        #[arg(long, value_name = "path|-", allow_hyphen_values = true)]
         input: String,
         /// Agent kind
         #[arg(long, value_name = "kind", default_value = "unknown")]
@@ -319,7 +360,8 @@ enum Verb {
     #[command(
         about = "lint an overseer task file for spec defects",
         long_about = None,
-        after_help = TASK_AFTER_HELP
+        after_help = TASK_AFTER_HELP,
+        args_override_self = true
     )]
     Task {
         /// Task file; - reads stdin
@@ -331,7 +373,8 @@ enum Verb {
         about = "type each item and response in an overseer review round \
                  file",
         long_about = None,
-        after_help = REVIEW_AFTER_HELP
+        after_help = REVIEW_AFTER_HELP,
+        args_override_self = true
     )]
     Review {
         /// Review round file; - reads stdin
@@ -340,12 +383,25 @@ enum Verb {
     },
 }
 
+/// Every spelling Go's `strconv.ParseBool` accepts, true ones first.
+const GO_BOOLS: [&str; 12] = [
+    "1", "t", "T", "TRUE", "true", "True", "0", "f", "F", "FALSE", "false",
+    "False",
+];
+
+/// Returns the `--pretty` / `--dry-run` value parser: exactly
+/// [`GO_BOOLS`], mapped onto `bool`.
+fn go_bool() -> impl TypedValueParser<Value = bool> {
+    PossibleValuesParser::new(GO_BOOLS)
+        .map(|value| GO_BOOLS[..6].contains(&value.as_str()))
+}
+
 /// Parses a Go `time.Duration` string such as `10s`, `1h30m`, `.5s`,
 /// or `0`.
 ///
-/// Returns `Ok(None)` for a zero or negative duration, meaning "no
-/// timeout", and `Ok(Some(d))` for a positive one, truncated to whole
-/// nanoseconds.
+/// Truncates the total to whole nanoseconds, then returns `Ok(None)`
+/// for a zero or negative result, meaning "no timeout", and
+/// `Ok(Some(d))` for a positive one.
 ///
 /// # Errors
 ///
@@ -402,11 +458,13 @@ pub fn parse_go_duration(s: &str) -> Result<Option<Duration>, String> {
         return Err(format!("invalid duration {s:?}: overflows"));
     }
 
-    if negative || nanos == 0.0 {
+    let nanos = nanos as u64;
+
+    if negative || nanos == 0 {
         return Ok(None);
     }
 
-    Ok(Some(Duration::from_nanos(nanos as u64)))
+    Ok(Some(Duration::from_nanos(nanos)))
 }
 
 /// Rewrites Go-style single-dash long flags (`-input`, `-pretty=false`)
@@ -588,13 +646,23 @@ impl DryRun<'_> {
 }
 
 /// Writes `value` to `stdout` as one JSON document plus a newline,
-/// indented when `pretty`, and flushes it.
+/// indented when `pretty`, and flushes it, all under [`OUTPUT`].
+///
+/// # Errors
+///
+/// [`Error::Output`] without writing once SIGINT has been seen, so
+/// [`run`] reports the interrupt instead of starting a record.
 fn write_json(
     stdout: &mut dyn Write,
     value: &impl Serialize,
     pretty: bool,
 ) -> Result<(), Error> {
     let text = format_json(&serde_json::to_string(value)?, pretty);
+    let _guard = lock_output();
+
+    if INTERRUPTED.load(Ordering::SeqCst) {
+        return Err(io::Error::from(io::ErrorKind::Interrupted).into());
+    }
 
     writeln!(stdout, "{text}")?;
     stdout.flush()?;
@@ -680,8 +748,9 @@ fn newline(out: &mut String, depth: usize) {
 /// exit code.
 ///
 /// Help and version go to `stdout` with exit 0. Every failure writes
-/// one JSON error record as the last `stderr` line. Never exits the
-/// process and never holds a stdout or stderr lock across a blocking
+/// one JSON error record as the last `stderr` line. Exits the process
+/// only through [`interrupt_exit`], once SIGINT has been seen, and
+/// never holds [`OUTPUT`] or a stdout or stderr lock across a blocking
 /// read or request.
 pub fn run(
     args: Vec<OsString>,
@@ -713,17 +782,18 @@ pub fn run(
         return EXIT_OK;
     };
 
-    if INTERRUPTED.load(Ordering::SeqCst) {
-        report_interrupted(stderr);
-
-        return EXIT_INTERRUPTED;
-    }
-
     let (kind, status, code) = err.classify();
     let mut message = err.to_string();
 
     if let Some(key) = session.key.as_deref().filter(|key| !key.is_empty()) {
         message = message.replace(key, "[redacted]");
+    }
+
+    let guard = lock_output();
+
+    if INTERRUPTED.load(Ordering::SeqCst) {
+        drop(guard);
+        interrupt_exit(stderr);
     }
 
     write_record(stderr, kind, &message, status);
@@ -745,13 +815,16 @@ fn report_clap(
         err.kind(),
         ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
     ) {
-        return match write!(stdout, "{text}").and_then(|()| stdout.flush()) {
-            Ok(()) => EXIT_OK,
-            Err(_) if INTERRUPTED.load(Ordering::SeqCst) => {
-                report_interrupted(stderr);
+        let guard = lock_output();
+        let written = write!(stdout, "{text}").and_then(|()| stdout.flush());
 
-                EXIT_INTERRUPTED
-            }
+        if INTERRUPTED.load(Ordering::SeqCst) {
+            drop(guard);
+            interrupt_exit(stderr);
+        }
+
+        return match written {
+            Ok(()) => EXIT_OK,
             Err(err) => {
                 write_record(
                     stderr,
@@ -773,6 +846,13 @@ fn report_clap(
 
             line.strip_prefix("error: ").unwrap_or(line)
         };
+
+    let guard = lock_output();
+
+    if INTERRUPTED.load(Ordering::SeqCst) {
+        drop(guard);
+        interrupt_exit(stderr);
+    }
 
     // The record below is the error report; a failed write of the
     // human-readable text before it changes nothing.
@@ -1091,6 +1171,7 @@ mod tests {
             ("500ms", Duration::from_millis(500)),
             ("1h30m", Duration::from_secs(5400)),
             (".5s", Duration::from_millis(500)),
+            ("1ns", Duration::from_nanos(1)),
             ("1.5s", Duration::from_millis(1500)),
             ("1µs", Duration::from_micros(1)),
             ("1μs", Duration::from_micros(1)),
@@ -1101,7 +1182,7 @@ mod tests {
             assert_eq!(parse_go_duration(input), Ok(Some(want)), "{input}");
         }
 
-        for input in ["0", "+0", "-0", "-1s", "0s"] {
+        for input in ["0", "+0", "-0", "-1s", "0s", ".5ns", "0.999ns"] {
             assert_eq!(parse_go_duration(input), Ok(None), "{input}");
         }
 

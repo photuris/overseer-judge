@@ -871,3 +871,247 @@ fn should_exit_130_on_sigint_while_reading_stdin() {
 
     assert_interrupted(&out);
 }
+
+#[cfg(unix)]
+#[test]
+fn should_write_one_interrupt_record_when_stderr_is_full() {
+    use std::{
+        io::{ErrorKind, Read, Write},
+        os::unix::net::UnixStream,
+    };
+
+    // A socket stands in for the pipe: std can make it non-blocking,
+    // which is how the buffer is filled to the last byte.
+    let (mut reader, mut writer) = UnixStream::pair().unwrap();
+    writer.set_nonblocking(true).unwrap();
+    let mut filled = 0;
+    loop {
+        match writer.write(&[b'x'; 4096]) {
+            Ok(n) => filled += n,
+            Err(err) if err.kind() == ErrorKind::WouldBlock => break,
+            Err(err) => panic!("fill: {err}"),
+        }
+    }
+    writer.set_nonblocking(false).unwrap();
+    let sandbox = Sandbox::new();
+    let mut cmd = sandbox.command(
+        "http://unused",
+        None,
+        &["raw", "--dry-run", "--input", "-"],
+    );
+    cmd.stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::from(std::os::fd::OwnedFd::from(writer)));
+    let mut child = cmd.spawn().unwrap();
+    // Drop the command's copy of the write end, so EOF follows the
+    // child's exit.
+    drop(cmd);
+
+    thread::sleep(Duration::from_millis(300));
+    interrupt(child.id());
+    thread::sleep(Duration::from_millis(200));
+    drop(child.stdin.take());
+    thread::sleep(Duration::from_millis(300));
+    assert!(
+        child.try_wait().unwrap().is_none(),
+        "exited before stderr had room for the record"
+    );
+    let mut drained = vec![0; filled];
+    reader.read_exact(&mut drained).unwrap();
+    let status = wait_within(&mut child, Duration::from_secs(5));
+    let mut rest = Vec::new();
+    reader.read_to_end(&mut rest).unwrap();
+    let out = Output {
+        status,
+        stdout: Vec::new(),
+        stderr: rest,
+    };
+
+    assert_interrupted(&out);
+}
+
+#[cfg(unix)]
+#[test]
+fn should_never_cut_a_stdout_record_on_sigint() {
+    let sandbox = Sandbox::new();
+    let round = format!(
+        "### R1-01: Finding\n- severity: minor\n\n{}\n",
+        "x".repeat(1 << 20)
+    );
+    let path = sandbox.file("round.md", &round);
+
+    let child = sandbox
+        .command("http://unused", None, &["review", "--dry-run", "-"])
+        .stdin(fs::File::open(path).unwrap())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    // stdout stays unread until after the signal, so the record is
+    // stuck mid-write when it arrives.
+    thread::sleep(Duration::from_millis(300));
+    interrupt(child.id());
+    let out = child.wait_with_output().unwrap();
+
+    assert!(
+        out.stdout.is_empty() || out.stdout.ends_with(b"\n"),
+        "stdout cut after {} bytes",
+        out.stdout.len()
+    );
+    for line in stdout(&out).lines() {
+        serde_json::from_str::<Value>(line).unwrap();
+    }
+    if out.status.code() == Some(0) {
+        assert_eq!(stderr(&out), "");
+    } else {
+        assert_interrupted(&out);
+    }
+}
+
+#[test]
+fn should_let_the_last_repeated_flag_win() {
+    let server = MockServer::start();
+    serve(&server, 200, RAW_RESPONSE, Duration::from_millis(300));
+    let sandbox = Sandbox::new();
+    let raw = ["raw", "--input", "-"];
+
+    let string = sandbox.run(
+        "http://unused",
+        None,
+        &[
+            &raw[..],
+            &["--dry-run", "--model", "first", "-model", "last"],
+        ]
+        .concat(),
+        RAW_INPUT,
+    );
+    let duration = sandbox.run(
+        &server.base_url(),
+        Some(KEY),
+        &[&raw[..], &["-timeout", "1ms", "--timeout", "0"]].concat(),
+        RAW_INPUT,
+    );
+    let boolean = sandbox.run(
+        "http://unused",
+        None,
+        &[
+            &raw[..],
+            &["--dry-run=false", "-dry-run", "--pretty", "-pretty=false"],
+        ]
+        .concat(),
+        RAW_INPUT,
+    );
+    let session = |agents: &[&str]| {
+        let args =
+            [&["session", "--dry-run", "--input", "-"], agents].concat();
+        let out = sandbox.run("http://unused", None, &args, "tail");
+        assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+
+        stdout_json(&out)
+    };
+
+    assert_eq!(string.status.code(), Some(0), "{}", stderr(&string));
+    assert_eq!(stdout_json(&string)["body"]["model"], "last");
+    assert_eq!(duration.status.code(), Some(0), "{}", stderr(&duration));
+    assert_eq!(boolean.status.code(), Some(0), "{}", stderr(&boolean));
+    assert_eq!(stdout(&boolean).lines().count(), 1);
+    assert_eq!(
+        session(&["--agent", "claude", "-agent", "pi"]),
+        session(&["--agent", "pi"])
+    );
+    assert_ne!(session(&["--agent", "pi"]), session(&["--agent", "claude"]));
+}
+
+#[test]
+fn should_read_dash_prefixed_input_files() {
+    let sandbox = Sandbox::new();
+    sandbox.file("-weird.json", RAW_INPUT);
+    sandbox.file("-weird.txt", "tail");
+    let run = |args: &[&str]| {
+        Command::from_std(sandbox.command("http://unused", None, args))
+            .current_dir(sandbox.dir.path())
+            .output()
+            .unwrap()
+    };
+
+    let raw = run(&["raw", "--dry-run", "--input", "-weird.json"]);
+    let session = run(&["session", "--dry-run", "-input", "-weird.txt"]);
+
+    assert_eq!(raw.status.code(), Some(0), "{}", stderr(&raw));
+    assert_eq!(stdout_json(&raw)["body"]["model"], ENV_MODEL);
+    assert_eq!(session.status.code(), Some(0), "{}", stderr(&session));
+    assert!(stdout(&session).contains("tail"), "{}", stdout(&session));
+}
+
+#[test]
+fn should_accept_go_boolean_spellings() {
+    let sandbox = Sandbox::new();
+    let spellings = [
+        ("1", true),
+        ("t", true),
+        ("T", true),
+        ("TRUE", true),
+        ("true", true),
+        ("True", true),
+        ("0", false),
+        ("f", false),
+        ("F", false),
+        ("FALSE", false),
+        ("false", false),
+        ("False", false),
+    ];
+
+    for (n, (value, want)) in spellings.into_iter().enumerate() {
+        let dash = if n % 2 == 0 { "--" } else { "-" };
+        let dry_run = format!("{dash}dry-run={value}");
+        let pretty = format!("{dash}pretty={value}");
+
+        // Without a key, a real request fails with exit 3.
+        let sent = sandbox.run(
+            "http://unused",
+            None,
+            &["raw", "--input", "-", &dry_run],
+            RAW_INPUT,
+        );
+        let shown = sandbox.run(
+            "http://unused",
+            None,
+            &["raw", "--dry-run", "--input", "-", &pretty],
+            RAW_INPUT,
+        );
+
+        assert_eq!(
+            sent.status.code(),
+            Some(if want { 0 } else { 3 }),
+            "{dry_run}: {}",
+            stderr(&sent)
+        );
+        assert_eq!(shown.status.code(), Some(0), "{}", stderr(&shown));
+        assert_eq!(stdout(&shown).lines().count() > 1, want, "{pretty}");
+    }
+
+    let yes = sandbox.run(
+        "http://unused",
+        None,
+        &["raw", "--dry-run", "--input", "-", "--pretty=yes"],
+        RAW_INPUT,
+    );
+    assert_failure(&yes, 2, "usage");
+}
+
+#[test]
+fn should_disable_timeout_for_subnanosecond_values() {
+    let server = MockServer::start();
+    serve(&server, 200, RAW_RESPONSE, Duration::from_millis(300));
+    let sandbox = Sandbox::new();
+
+    let out = sandbox.run(
+        &server.base_url(),
+        Some(KEY),
+        &["raw", "--input", "-", "--timeout", ".5ns"],
+        RAW_INPUT,
+    );
+
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(stdout_json(&out)["model"], "jev-1");
+}
