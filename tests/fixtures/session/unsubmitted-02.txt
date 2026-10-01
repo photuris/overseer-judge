@@ -1,0 +1,26 @@
+• Ran cargo build --release
+  └ Compiling herdr v0.4.1 (/home/joshua/Projects/personal/herdr)
+    Finished `release` profile [optimized] in 41.22s
+
+• Ran ./target/release/herdr agent read main:0.1 --lines 60
+  └ (60 lines of pane output)
+
+  The capture works, but `--format ansi` is still ignored: the
+  pane comes back cooked because capture-pane is called without
+  -e. One line in src/driver/tmux.rs.
+
+  Two options:
+    1. Always pass -e and strip in the caller.
+    2. Pass -e only when the caller asked for ansi.
+
+  Option 2 keeps the default output identical to today's, so
+  nothing downstream changes. I would take that one unless you
+  want the raw bytes everywhere.
+
+  Files I would touch:
+    src/driver/tmux.rs    capture_pane gains a flag
+    src/cli/agent.rs      --format threads through
+    src/driver/tests.rs   one case per format
+
+› take option 2, and add a test that the cooked path has no escapes
+  gpt-6-astra medium · ~/Projects/personal/herd…

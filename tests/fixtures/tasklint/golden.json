@@ -1,0 +1,277 @@
+{
+  "LABELS.md": {
+    "body": null,
+    "method": "",
+    "path": "",
+    "static": [
+      {
+        "check": "status_line",
+        "detail": "status \"\" is not one of ready|in-progress|done|accepted",
+        "ok": false
+      },
+      {
+        "check": "sections_present",
+        "detail": "Objective, Files, Out of scope, Acceptance, Budget, Rules, Result, Verification",
+        "ok": false
+      },
+      {
+        "check": "sections_ordered",
+        "ok": true
+      },
+      {
+        "check": "allowed_nonempty",
+        "detail": "no Allowed: line",
+        "ok": false
+      },
+      {
+        "check": "acceptance_command",
+        "detail": "no Command: line",
+        "ok": false
+      },
+      {
+        "check": "budget_numeric",
+        "detail": "no \"<n> turns\" in the budget",
+        "ok": false
+      }
+    ]
+  },
+  "broken-01.md": {
+    "body": null,
+    "method": "",
+    "path": "",
+    "static": [
+      {
+        "check": "status_line",
+        "ok": true
+      },
+      {
+        "check": "sections_present",
+        "detail": "Acceptance, Rules",
+        "ok": false
+      },
+      {
+        "check": "sections_ordered",
+        "detail": "Files appears after Out of scope",
+        "ok": false
+      },
+      {
+        "check": "allowed_nonempty",
+        "ok": true
+      },
+      {
+        "check": "acceptance_command",
+        "detail": "no Command: line",
+        "ok": false
+      },
+      {
+        "check": "budget_numeric",
+        "ok": true
+      }
+    ]
+  },
+  "generic-scope-01.md": {
+    "body": {
+      "questions": {
+        "acceptance_strength": {
+          "criteria": [
+            "The Expect lines check only that something runs, prints anything, or exits 0. A wrong or empty implementation would pass.",
+            "The Expect lines mostly check that commands or a test suite pass, with little or nothing tied to the specific behavior the objective describes.",
+            "Some Expect lines name specific output, strings, counts, or exit codes tied to the objective, but at least one only checks that a command or test suite passes.",
+            "Every Expect line names specific output, strings, counts, or exit codes tied to the behavior the objective describes. A wrong implementation would fail."
+          ],
+          "instructions": "`acceptance` lists shell commands, each with an `Expect:` line, used to decide whether a coding task described by `objective` was completed correctly. Rate how well the Expect lines would catch a wrong or incomplete implementation.",
+          "type": "score"
+        },
+        "needs_interpretation": {
+          "criteria": {
+            "false": "The task names the concrete things that will exist (files, functions, types, behaviors) precisely enough that two engineers would build the same thing.",
+            "true": "The objective or spec uses words like improve, clean up, make robust, handle properly, or describes an outcome without saying what to build; a capable engineer would need to decide the design before starting."
+          },
+          "instructions": "The state is one task specification written for a less capable coding agent that executes specs literally. `objective` says what must exist; `spec` (possibly empty) gives interfaces and behavior. Does completing the task require the agent to make design decisions, choose between approaches, or guess intent, rather than execute steps and interfaces the spec states?",
+          "type": "noul"
+        },
+        "scope_generic": {
+          "criteria": {
+            "false": "Out of scope names at least one concrete thing an agent might plausibly do and forbids it.",
+            "true": "Out of scope is boilerplate; it names no specific feature, file, refactor, or dependency to avoid."
+          },
+          "instructions": "`out_of_scope` should name the specific tempting adjacent work an agent might do while completing `objective`. Is it generic instead, saying only 'anything else' or restating that unlisted files are off limits, without naming concrete adjacent work?",
+          "type": "noul"
+        }
+      },
+      "state": {
+        "acceptance": "Command: go test ./internal/config/ -run Permission -count=1 -v\nExpect: exit 0; output names `TestKeyRejectsGroupReadableFile` and\nends with `PASS`\n\nCommand: install -m 0644 /dev/null /tmp/jev-loose && TYPESAFE_API_KEY= XDG_CONFIG_HOME=/tmp go run ./cmd/overseer-judge raw --input - < /dev/null; echo \"exit=$?\"\nExpect: prints `exit=2`; stderr's last line is a JSON object\n\n",
+        "files": "Allowed: internal/config/config.go, internal/config/config_test.go\nRead-only: internal/cli/exit.go, internal/cli/cli.go,\n.overseer/PLAN.md\n\n",
+        "objective": "`config.Key` refuses a key file that is group- or world-readable.\nWhen `~/.config/jev` exists and its mode has any bit outside `0600`\nset, `Key` returns a `*config.PermissionError` naming the path and\nthe octal mode it found, and reads no bytes from the file. The\nenvironment variable path is unaffected: `TYPESAFE_API_KEY` is used\nwhenever it is non-empty, whatever the file's mode.\n\n",
+        "out_of_scope": "Anything not listed under Allowed. Anything else is off limits.\n\n",
+        "spec": "```go\n// PermissionError reports a key file other users can read.\ntype PermissionError struct {\n\tPath string\n\tMode fs.FileMode\n}\n\n// Error implements error.\nfunc (e *PermissionError) Error() string\n```\n\n`Error` reads `key file %s is mode %04o, want 0600`. `Key` checks the\nmode with `os.Stat` before opening the file. `classify` in\n`internal/cli/exit.go` already routes an unrecognised error to exit\n1; a later task maps this one to exit 3.\n\n"
+      }
+    },
+    "method": "POST",
+    "path": "/v1/systemone"
+  },
+  "good-01.md": {
+    "body": {
+      "questions": {
+        "acceptance_strength": {
+          "criteria": [
+            "The Expect lines check only that something runs, prints anything, or exits 0. A wrong or empty implementation would pass.",
+            "The Expect lines mostly check that commands or a test suite pass, with little or nothing tied to the specific behavior the objective describes.",
+            "Some Expect lines name specific output, strings, counts, or exit codes tied to the objective, but at least one only checks that a command or test suite passes.",
+            "Every Expect line names specific output, strings, counts, or exit codes tied to the behavior the objective describes. A wrong implementation would fail."
+          ],
+          "instructions": "`acceptance` lists shell commands, each with an `Expect:` line, used to decide whether a coding task described by `objective` was completed correctly. Rate how well the Expect lines would catch a wrong or incomplete implementation.",
+          "type": "score"
+        },
+        "needs_interpretation": {
+          "criteria": {
+            "false": "The task names the concrete things that will exist (files, functions, types, behaviors) precisely enough that two engineers would build the same thing.",
+            "true": "The objective or spec uses words like improve, clean up, make robust, handle properly, or describes an outcome without saying what to build; a capable engineer would need to decide the design before starting."
+          },
+          "instructions": "The state is one task specification written for a less capable coding agent that executes specs literally. `objective` says what must exist; `spec` (possibly empty) gives interfaces and behavior. Does completing the task require the agent to make design decisions, choose between approaches, or guess intent, rather than execute steps and interfaces the spec states?",
+          "type": "noul"
+        },
+        "scope_generic": {
+          "criteria": {
+            "false": "Out of scope names at least one concrete thing an agent might plausibly do and forbids it.",
+            "true": "Out of scope is boilerplate; it names no specific feature, file, refactor, or dependency to avoid."
+          },
+          "instructions": "`out_of_scope` should name the specific tempting adjacent work an agent might do while completing `objective`. Is it generic instead, saying only 'anything else' or restating that unlisted files are off limits, without naming concrete adjacent work?",
+          "type": "noul"
+        }
+      },
+      "state": {
+        "acceptance": "Command: go test ./... -count=1\nExpect: exit 0; every package line starts with `ok`, none with `FAIL`\n\nCommand: go run ./cmd/overseer-judge --version\nExpect: exit 0; prints exactly `dev`\n\nCommand: TYPESAFE_API_KEY= go run ./cmd/overseer-judge raw --input - < /dev/null; echo \"exit=$?\"\nExpect: prints `exit=2`; the last stderr line is a JSON object whose\n`.error.type` is `usage`\n\n",
+        "files": "Allowed: go.mod, cmd/overseer-judge/main.go,\ninternal/config/config.go, internal/config/config_test.go,\ninternal/jev/jev.go, internal/jev/errors.go, internal/jev/jev_test.go,\ninternal/cli/cli.go, internal/cli/raw.go, internal/cli/exit.go,\ninternal/cli/commands.go, internal/cli/cli_test.go,\ninternal/cli/testdata/help.txt, README.md, AGENTS.md, CLAUDE.md\nRead-only: .overseer/PLAN.md\n\n",
+        "objective": "The module builds and `overseer-judge --version` prints the version.\n`internal/config` resolves the API key, base URL, and model;\n`internal/jev` posts one System One request and decodes the response\ninto typed answers and typed errors; `internal/cli` parses flags,\ndispatches verbs, and maps every failure onto an exit code. The `raw`\nverb sends an arbitrary request body through the authenticated\nclient.\n\n",
+        "out_of_scope": "The `session`, `task`, and `review` verbs and their packages: they\nbelong to tasks 002 to 004. An LLM fallback backend. An MCP server. A\n`--env` flag; there is no production/test split for a read-only\njudgment API. Adding cobra, testify, or go-cmp.\n\n",
+        "spec": "`config.Load` returns the base URL and model from the environment,\ndefaulting to `https://api.typesafe.ai` and `jev-latest`.\n`config.Key` reads `TYPESAFE_API_KEY`, else the bare token in\n`~/.config/jev`, and returns `ErrNoKey` when both are empty.\n`jev.Client.Ask` posts to `/v1/systemone` with a bearer token,\nretries 429 and 5xx twice with waits of 500ms then 1s, and returns\none typed error per failure class: `AuthError`, `RequestError`,\n`RateLimitError`, `ServerError`, `ResponseError`, `NetworkError`.\n`cli.Run` returns the exit code and never calls `os.Exit`.\n\n"
+      }
+    },
+    "method": "POST",
+    "path": "/v1/systemone"
+  },
+  "good-02.md": {
+    "body": {
+      "questions": {
+        "acceptance_strength": {
+          "criteria": [
+            "The Expect lines check only that something runs, prints anything, or exits 0. A wrong or empty implementation would pass.",
+            "The Expect lines mostly check that commands or a test suite pass, with little or nothing tied to the specific behavior the objective describes.",
+            "Some Expect lines name specific output, strings, counts, or exit codes tied to the objective, but at least one only checks that a command or test suite passes.",
+            "Every Expect line names specific output, strings, counts, or exit codes tied to the behavior the objective describes. A wrong implementation would fail."
+          ],
+          "instructions": "`acceptance` lists shell commands, each with an `Expect:` line, used to decide whether a coding task described by `objective` was completed correctly. Rate how well the Expect lines would catch a wrong or incomplete implementation.",
+          "type": "score"
+        },
+        "needs_interpretation": {
+          "criteria": {
+            "false": "The task names the concrete things that will exist (files, functions, types, behaviors) precisely enough that two engineers would build the same thing.",
+            "true": "The objective or spec uses words like improve, clean up, make robust, handle properly, or describes an outcome without saying what to build; a capable engineer would need to decide the design before starting."
+          },
+          "instructions": "The state is one task specification written for a less capable coding agent that executes specs literally. `objective` says what must exist; `spec` (possibly empty) gives interfaces and behavior. Does completing the task require the agent to make design decisions, choose between approaches, or guess intent, rather than execute steps and interfaces the spec states?",
+          "type": "noul"
+        },
+        "scope_generic": {
+          "criteria": {
+            "false": "Out of scope names at least one concrete thing an agent might plausibly do and forbids it.",
+            "true": "Out of scope is boilerplate; it names no specific feature, file, refactor, or dependency to avoid."
+          },
+          "instructions": "`out_of_scope` should name the specific tempting adjacent work an agent might do while completing `objective`. Is it generic instead, saying only 'anything else' or restating that unlisted files are off limits, without naming concrete adjacent work?",
+          "type": "noul"
+        }
+      },
+      "state": {
+        "acceptance": "Command: go test ./internal/tasklint/ -run Template -count=1 -v\nExpect: exit 0; output names `TestTemplateMatchesHeadings` and `PASS`\n\nCommand: grep -c '^## ' docs/task-template.md\nExpect: exit 0; prints `8`\n\n",
+        "files": "Allowed: docs/task-template.md, internal/tasklint/template.go,\ninternal/tasklint/template_test.go\nRead-only: internal/tasklint/static.go, .overseer/PLAN.md\n\n",
+        "objective": "`docs/task-template.md` exists and holds the task-file template\nverbatim, and `internal/tasklint.TemplateHeadings` returns the eight\nrequired heading names in template order. A test reads\n`docs/task-template.md`, extracts its `## ` headings, and asserts\nthey equal `TemplateHeadings()`, so the document and the checker\ncannot drift apart.\n\n",
+        "out_of_scope": "Changing the required heading list or the order of the checks in\n`Static`. Rendering the template into new task files. Adding a\n`template` verb to the CLI. Teaching the parser any heading level\nother than `## `.\n\n",
+        "spec": "`docs/task-template.md` holds exactly this, and nothing else:\n\n```\n# NNN slug\nStatus: ready\n\n## Objective\n## Files\nAllowed:\nRead-only:\n\n## Out of scope\n\n## Acceptance\nCommand: false\nExpect: replace this line with the real expectation\n\n## Budget\n\n## Rules\n\n## Result\n\n## Verification\n```\n\n`TemplateHeadings` returns a fresh slice each call, so a caller that\nsorts it cannot corrupt the checker:\n\n```go\n// TemplateHeadings returns the required headings in template order.\nfunc TemplateHeadings() []string\n```\n\n"
+      }
+    },
+    "method": "POST",
+    "path": "/v1/systemone"
+  },
+  "vacuous-01.md": {
+    "body": {
+      "questions": {
+        "acceptance_strength": {
+          "criteria": [
+            "The Expect lines check only that something runs, prints anything, or exits 0. A wrong or empty implementation would pass.",
+            "The Expect lines mostly check that commands or a test suite pass, with little or nothing tied to the specific behavior the objective describes.",
+            "Some Expect lines name specific output, strings, counts, or exit codes tied to the objective, but at least one only checks that a command or test suite passes.",
+            "Every Expect line names specific output, strings, counts, or exit codes tied to the behavior the objective describes. A wrong implementation would fail."
+          ],
+          "instructions": "`acceptance` lists shell commands, each with an `Expect:` line, used to decide whether a coding task described by `objective` was completed correctly. Rate how well the Expect lines would catch a wrong or incomplete implementation.",
+          "type": "score"
+        },
+        "needs_interpretation": {
+          "criteria": {
+            "false": "The task names the concrete things that will exist (files, functions, types, behaviors) precisely enough that two engineers would build the same thing.",
+            "true": "The objective or spec uses words like improve, clean up, make robust, handle properly, or describes an outcome without saying what to build; a capable engineer would need to decide the design before starting."
+          },
+          "instructions": "The state is one task specification written for a less capable coding agent that executes specs literally. `objective` says what must exist; `spec` (possibly empty) gives interfaces and behavior. Does completing the task require the agent to make design decisions, choose between approaches, or guess intent, rather than execute steps and interfaces the spec states?",
+          "type": "noul"
+        },
+        "scope_generic": {
+          "criteria": {
+            "false": "Out of scope names at least one concrete thing an agent might plausibly do and forbids it.",
+            "true": "Out of scope is boilerplate; it names no specific feature, file, refactor, or dependency to avoid."
+          },
+          "instructions": "`out_of_scope` should name the specific tempting adjacent work an agent might do while completing `objective`. Is it generic instead, saying only 'anything else' or restating that unlisted files are off limits, without naming concrete adjacent work?",
+          "type": "noul"
+        }
+      },
+      "state": {
+        "acceptance": "Command: go test ./internal/usage/ -count=1\nExpect: the command runs and exits 0\n\nCommand: go run ./cmd/overseer-judge usage --since 2026-01-01\nExpect: prints something\n\nCommand: go run ./cmd/overseer-judge usage --help\nExpect: exit 0\n\n",
+        "files": "Allowed: internal/usage/usage.go, internal/usage/usage_test.go,\ninternal/usage/testdata/ledger.jsonl, internal/cli/usage.go,\ninternal/cli/commands.go\nRead-only: internal/jev/jev.go, internal/cli/cli.go,\ninternal/cli/exit.go, .overseer/PLAN.md\n\n",
+        "objective": "`overseer-judge usage --since <date>` exists. It reads the JSONL\nledger at `~/.local/state/overseer-judge/usage.jsonl`, sums\n`input_tokens` and `output_tokens` per verb over the records whose\n`at` field is on or after `--since`, and prints one JSON object:\n`{\"since\": <date>, \"verbs\": {<verb>: {\"calls\": n, \"input_tokens\": n,\n\"output_tokens\": n}}, \"total_tokens\": n}`. A missing ledger is not an\nerror: the verb prints zeroes.\n\n",
+        "out_of_scope": "Writing the ledger: the verbs that would append to it are a later\ntask. Rotating or truncating the file. A `--until` flag. Per-model\nbreakdowns. Printing a human table; stdout stays one JSON object.\n\n",
+        "spec": "`usage.Sum(r io.Reader, since time.Time) (Report, error)` decodes one\nrecord per line and skips blank lines. A line that is not valid JSON\nis a `*usage.LineError` naming the 1-based line number. `Report` is\nthe object above, with `Verbs` a `map[string]Totals` so an absent\nverb simply does not appear.\n\n"
+      }
+    },
+    "method": "POST",
+    "path": "/v1/systemone"
+  },
+  "vague-01.md": {
+    "body": {
+      "questions": {
+        "acceptance_strength": {
+          "criteria": [
+            "The Expect lines check only that something runs, prints anything, or exits 0. A wrong or empty implementation would pass.",
+            "The Expect lines mostly check that commands or a test suite pass, with little or nothing tied to the specific behavior the objective describes.",
+            "Some Expect lines name specific output, strings, counts, or exit codes tied to the objective, but at least one only checks that a command or test suite passes.",
+            "Every Expect line names specific output, strings, counts, or exit codes tied to the behavior the objective describes. A wrong implementation would fail."
+          ],
+          "instructions": "`acceptance` lists shell commands, each with an `Expect:` line, used to decide whether a coding task described by `objective` was completed correctly. Rate how well the Expect lines would catch a wrong or incomplete implementation.",
+          "type": "score"
+        },
+        "needs_interpretation": {
+          "criteria": {
+            "false": "The task names the concrete things that will exist (files, functions, types, behaviors) precisely enough that two engineers would build the same thing.",
+            "true": "The objective or spec uses words like improve, clean up, make robust, handle properly, or describes an outcome without saying what to build; a capable engineer would need to decide the design before starting."
+          },
+          "instructions": "The state is one task specification written for a less capable coding agent that executes specs literally. `objective` says what must exist; `spec` (possibly empty) gives interfaces and behavior. Does completing the task require the agent to make design decisions, choose between approaches, or guess intent, rather than execute steps and interfaces the spec states?",
+          "type": "noul"
+        },
+        "scope_generic": {
+          "criteria": {
+            "false": "Out of scope names at least one concrete thing an agent might plausibly do and forbids it.",
+            "true": "Out of scope is boilerplate; it names no specific feature, file, refactor, or dependency to avoid."
+          },
+          "instructions": "`out_of_scope` should name the specific tempting adjacent work an agent might do while completing `objective`. Is it generic instead, saying only 'anything else' or restating that unlisted files are off limits, without naming concrete adjacent work?",
+          "type": "noul"
+        }
+      },
+      "state": {
+        "acceptance": "Command: go test ./internal/jev/ -count=1\nExpect: exit 0; the package line starts with `ok`, none say `FAIL`\n\nCommand: go test ./internal/jev/ -run Retry -count=1 -v 2>&1 | grep -c '^=== RUN'\nExpect: exit 0; prints a count of at least `4`\n\nCommand: go vet ./internal/jev/\nExpect: exit 0; prints nothing\n\n",
+        "files": "Allowed: internal/jev/jev.go, internal/jev/errors.go,\ninternal/jev/jev_test.go\nRead-only: internal/cli/exit.go, internal/config/config.go,\n.overseer/PLAN.md\n\n",
+        "objective": "Make the client more robust and improve error handling across the\npackage. The retry behaviour should be cleaned up so that transient\nupstream problems are handled properly instead of surfacing to the\ncaller, and the diagnostics should be more useful when something goes\nwrong. Make sure the package behaves sensibly under load and that timeouts are\ndealt with in a reasonable way.\n\n",
+        "out_of_scope": "Changing the exit-code map in `internal/cli/exit.go`; the CLI's\ncontract with callers stays as it is. Adding a circuit breaker or a\nrequest cache. Introducing `golang.org/x/time/rate` or any other\ndependency. Touching the `session` verb's question wording.\n\n",
+        "spec": ""
+      }
+    },
+    "method": "POST",
+    "path": "/v1/systemone"
+  }
+}

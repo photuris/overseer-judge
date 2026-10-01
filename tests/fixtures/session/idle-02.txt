@@ -1,0 +1,28 @@
+● Bash(go test ./... -count=1)
+  ⎿  ok  	overseer-judge/internal/cli	0.112s
+     ok  	overseer-judge/internal/config	0.004s
+     ok  	overseer-judge/internal/jev	0.031s
+
+● gofmt, vet, and the tests are all clean.
+
+  The client now treats a truncated body as a transport failure
+  rather than a contract violation, so a connection that dies
+  mid-response exits 8 instead of 7. Three places changed:
+
+  - internal/jev/jev.go:262  isReadFailure covers net.Error and
+    both context errors.
+  - internal/jev/jev.go:301  bodyError checks ctx.Err() first, so
+    a cancelled read is never reported as invalid content.
+  - internal/jev/jev_test.go:188  a test that cuts the connection
+    after half a body and asserts exit 8.
+
+  One thing I did not change: a 200 with a valid JSON body whose
+  `answers` member is an empty object is still accepted. It is a
+  well-formed response that happens to answer nothing, and the
+  accessors already return a ResponseError for the missing id.
+
+────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────
+
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for history

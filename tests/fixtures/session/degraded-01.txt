@@ -1,0 +1,38 @@
+● Update(internal/driver/tmux.go)
+  ⎿  Updated internal/driver/tmux.go with 6 additions
+
+● Now I will verify the capture flags reach the registry.
+
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+  Now I will verify the capture flags reach the registry.
+✶ Wrangling… (esc to interrupt · 6m 02s · ↓ 41.7k tokens)

@@ -1,0 +1,532 @@
+{
+  "round-01.md": [
+    {
+      "questions": {
+        "response_0": {
+          "criteria": {
+            "agree": "Accepts the finding without claiming a fix yet, e.g. 'will do', 'agreed, next round'.",
+            "concern": "Disputes the finding by argument or opinion only, with nothing checkable named.",
+            "evidence": "Disputes the finding by pointing at something checkable: a code citation with a path or line, an existing test, a command output, or a reproduction.",
+            "fixed": "Says a change was made and names where or how (a function, file, commit, or test), addressing the finding.",
+            "question": "Asks the reviewer for clarification or more information instead of fixing or disputing."
+          },
+          "instructions": "`responses[0]` is the implementer's reply to `finding`. Classify the reply by what it does, not by whether it is right.",
+          "type": "choice"
+        },
+        "style_only": {
+          "criteria": {
+            "false": "The finding claims a bug, a missing behavior, a test gap, a violated acceptance criterion, or work outside the allowed scope.",
+            "true": "The finding would not change what the program does or whether the task's acceptance passes; it is taste."
+          },
+          "instructions": "`finding` is one code-review finding written against a task specification. Is it purely a style or preference remark (naming, formatting, ordering, wording, idiom choice) with no claim about correctness, behavior, the task's acceptance criteria, or scope?",
+          "type": "noul"
+        }
+      },
+      "state": {
+        "finding": {
+          "body": "`rerunPending()` only rejects busy, resolving, and recording states. The main window remains usable beside the editor window, so a user can open a pending-transcript popup and press “Re-run” while `editorOpen` is true; this starts scrubbing and leaves the editor able to write mappings during that batch. Make this entry point reject `m_editorOpen` with the same “close the mapping editor first” status, and cover it alongside the drop and recording guards.",
+          "file": "src/shell/controller.cpp:1055",
+          "id": "R6-01",
+          "severity": "medium",
+          "title": "Pending re-run can start a batch while the mapping editor is open"
+        },
+        "responses": [
+          "fixed in `rerunPending`, which now refuses with `close the mapping editor first` before any other check, and in `deletePending`, which had no guards at all and is the other way into the same working directories (the task spec names both). Test: `rerun_pending_refused_while_editor_open`, which also checks the run list is untouched and that both calls work again after `closeEditor()`."
+        ]
+      }
+    },
+    {
+      "questions": {
+        "response_0": {
+          "criteria": {
+            "agree": "Accepts the finding without claiming a fix yet, e.g. 'will do', 'agreed, next round'.",
+            "concern": "Disputes the finding by argument or opinion only, with nothing checkable named.",
+            "evidence": "Disputes the finding by pointing at something checkable: a code citation with a path or line, an existing test, a command output, or a reproduction.",
+            "fixed": "Says a change was made and names where or how (a function, file, commit, or test), addressing the finding.",
+            "question": "Asks the reviewer for clarification or more information instead of fixing or disputing."
+          },
+          "instructions": "`responses[0]` is the implementer's reply to `finding`. Classify the reply by what it does, not by whether it is right.",
+          "type": "choice"
+        },
+        "style_only": {
+          "criteria": {
+            "false": "The finding claims a bug, a missing behavior, a test gap, a violated acceptance criterion, or work outside the allowed scope.",
+            "true": "The finding would not change what the program does or whether the task's acceptance passes; it is taste."
+          },
+          "instructions": "`finding` is one code-review finding written against a task specification. Is it purely a style or preference remark (naming, formatting, ordering, wording, idiom choice) with no claim about correctness, behavior, the task's acceptance criteria, or scope?",
+          "type": "noul"
+        }
+      },
+      "state": {
+        "finding": {
+          "body": "The counter holding how many pending transcripts a batch has left to\nscrub is called `n`, and the two loops beside it use `i` and `k`, so\nthe block reads as arithmetic rather than as batch bookkeeping.\n`remaining` would say what it holds. Nothing the program does changes\neither way; the task's acceptance does not mention naming.",
+          "file": "src/shell/controller.cpp:1180",
+          "id": "R6-02",
+          "severity": "low",
+          "title": "`n` is a poor name for the pending-batch counter"
+        },
+        "responses": [
+          "agreed, will rename it in the next round."
+        ]
+      }
+    },
+    {
+      "questions": {
+        "response_0": {
+          "criteria": {
+            "agree": "Accepts the finding without claiming a fix yet, e.g. 'will do', 'agreed, next round'.",
+            "concern": "Disputes the finding by argument or opinion only, with nothing checkable named.",
+            "evidence": "Disputes the finding by pointing at something checkable: a code citation with a path or line, an existing test, a command output, or a reproduction.",
+            "fixed": "Says a change was made and names where or how (a function, file, commit, or test), addressing the finding.",
+            "question": "Asks the reviewer for clarification or more information instead of fixing or disputing."
+          },
+          "instructions": "`responses[0]` is the implementer's reply to `finding`. Classify the reply by what it does, not by whether it is right.",
+          "type": "choice"
+        },
+        "style_only": {
+          "criteria": {
+            "false": "The finding claims a bug, a missing behavior, a test gap, a violated acceptance criterion, or work outside the allowed scope.",
+            "true": "The finding would not change what the program does or whether the task's acceptance passes; it is taste."
+          },
+          "instructions": "`finding` is one code-review finding written against a task specification. Is it purely a style or preference remark (naming, formatting, ordering, wording, idiom choice) with no claim about correctness, behavior, the task's acceptance criteria, or scope?",
+          "type": "noul"
+        }
+      },
+      "state": {
+        "finding": {
+          "body": "`cancelBatch()` sets `m_cancelled` and returns. The worker thread\ntests that flag between transcripts but not between the mapping\nwrites inside one transcript, so a cancelled batch can still write\nevery remaining mapping of the transcript it was on:\n\n```cpp\nfor (const auto &m : mappings) {\n    writeMapping(m);\n}\n```\n\nThis was reported once before, against a loop that has since been\nrewritten, and closed as fixed. The closed item read, in full:\n\n```\n### R9-99: not an item\n- file: src/shell/scrub.cpp:190\n- severity: high\n- status: resolved\nThe inner loop ignores cancellation between mapping writes.\n---\n```\n\nThe rewrite moved the loop and lost the check with it. The inner loop\nneeds the same guard the outer one has, or cancellation does not mean\nwhat the status line says it means.",
+          "file": "src/shell/scrub.cpp:212",
+          "id": "R6-03",
+          "severity": "high",
+          "title": "Scrub worker writes mappings after the batch is cancelled"
+        },
+        "responses": [
+          "the loop already exits: `writeMapping` returns false once `m_cancelled` is set, and the caller breaks on the first false (`src/shell/scrub.cpp:198`): ```cpp for (const auto &m : mappings) { if (!writeMapping(m)) { break; } } ``` This is covered by `scrub_cancel_stops_mid_transcript` in `tests/shell/scrub_test.cpp`, which cancels between two mappings of one transcript and asserts only the first landed on disk."
+        ]
+      }
+    },
+    {
+      "questions": {
+        "response_0": {
+          "criteria": {
+            "agree": "Accepts the finding without claiming a fix yet, e.g. 'will do', 'agreed, next round'.",
+            "concern": "Disputes the finding by argument or opinion only, with nothing checkable named.",
+            "evidence": "Disputes the finding by pointing at something checkable: a code citation with a path or line, an existing test, a command output, or a reproduction.",
+            "fixed": "Says a change was made and names where or how (a function, file, commit, or test), addressing the finding.",
+            "question": "Asks the reviewer for clarification or more information instead of fixing or disputing."
+          },
+          "instructions": "`responses[0]` is the implementer's reply to `finding`. Classify the reply by what it does, not by whether it is right.",
+          "type": "choice"
+        },
+        "style_only": {
+          "criteria": {
+            "false": "The finding claims a bug, a missing behavior, a test gap, a violated acceptance criterion, or work outside the allowed scope.",
+            "true": "The finding would not change what the program does or whether the task's acceptance passes; it is taste."
+          },
+          "instructions": "`finding` is one code-review finding written against a task specification. Is it purely a style or preference remark (naming, formatting, ordering, wording, idiom choice) with no claim about correctness, behavior, the task's acceptance criteria, or scope?",
+          "type": "noul"
+        }
+      },
+      "state": {
+        "finding": {
+          "body": "`advance()` increments the completed count for every transcript the\nworker finishes with, including the ones it skipped because their\naudio was missing. The progress bar therefore reaches 100% on a batch\nwhere nothing was scrubbed, and the summary line reports a count that\ndoes not match the run list. Count skips separately and report them.",
+          "file": "src/shell/progress.cpp:74",
+          "id": "R6-04",
+          "severity": "medium",
+          "title": "Batch progress counts skipped transcripts as done"
+        },
+        "responses": [
+          "I don't think this matters in practice. Anyone running a batch is watching the run list, which already shows the skips, and a second counter is more UI for a case that almost never comes up."
+        ]
+      }
+    },
+    {
+      "questions": {
+        "response_0": {
+          "criteria": {
+            "agree": "Accepts the finding without claiming a fix yet, e.g. 'will do', 'agreed, next round'.",
+            "concern": "Disputes the finding by argument or opinion only, with nothing checkable named.",
+            "evidence": "Disputes the finding by pointing at something checkable: a code citation with a path or line, an existing test, a command output, or a reproduction.",
+            "fixed": "Says a change was made and names where or how (a function, file, commit, or test), addressing the finding.",
+            "question": "Asks the reviewer for clarification or more information instead of fixing or disputing."
+          },
+          "instructions": "`responses[0]` is the implementer's reply to `finding`. Classify the reply by what it does, not by whether it is right.",
+          "type": "choice"
+        },
+        "style_only": {
+          "criteria": {
+            "false": "The finding claims a bug, a missing behavior, a test gap, a violated acceptance criterion, or work outside the allowed scope.",
+            "true": "The finding would not change what the program does or whether the task's acceptance passes; it is taste."
+          },
+          "instructions": "`finding` is one code-review finding written against a task specification. Is it purely a style or preference remark (naming, formatting, ordering, wording, idiom choice) with no claim about correctness, behavior, the task's acceptance criteria, or scope?",
+          "type": "noul"
+        }
+      },
+      "state": {
+        "finding": {
+          "body": "The retry wait doubles on every failure with no ceiling, so a\ntranscript that keeps failing pushes the wait past any useful bound\nand the batch appears to hang. Cap it.",
+          "file": "src/shell/scrub.cpp:301",
+          "id": "R6-05",
+          "severity": "medium",
+          "title": "Retry backoff is not bounded"
+        },
+        "responses": [
+          "what should the cap be? The task spec names no number, and the existing config has nothing I can read a ceiling from."
+        ]
+      }
+    },
+    {
+      "questions": {
+        "response_0": {
+          "criteria": {
+            "agree": "Accepts the finding without claiming a fix yet, e.g. 'will do', 'agreed, next round'.",
+            "concern": "Disputes the finding by argument or opinion only, with nothing checkable named.",
+            "evidence": "Disputes the finding by pointing at something checkable: a code citation with a path or line, an existing test, a command output, or a reproduction.",
+            "fixed": "Says a change was made and names where or how (a function, file, commit, or test), addressing the finding.",
+            "question": "Asks the reviewer for clarification or more information instead of fixing or disputing."
+          },
+          "instructions": "`responses[0]` is the implementer's reply to `finding`. Classify the reply by what it does, not by whether it is right.",
+          "type": "choice"
+        },
+        "response_1": {
+          "criteria": {
+            "agree": "Accepts the finding without claiming a fix yet, e.g. 'will do', 'agreed, next round'.",
+            "concern": "Disputes the finding by argument or opinion only, with nothing checkable named.",
+            "evidence": "Disputes the finding by pointing at something checkable: a code citation with a path or line, an existing test, a command output, or a reproduction.",
+            "fixed": "Says a change was made and names where or how (a function, file, commit, or test), addressing the finding.",
+            "question": "Asks the reviewer for clarification or more information instead of fixing or disputing."
+          },
+          "instructions": "`responses[1]` is the implementer's reply to `finding`. Classify the reply by what it does, not by whether it is right.",
+          "type": "choice"
+        },
+        "style_only": {
+          "criteria": {
+            "false": "The finding claims a bug, a missing behavior, a test gap, a violated acceptance criterion, or work outside the allowed scope.",
+            "true": "The finding would not change what the program does or whether the task's acceptance passes; it is taste."
+          },
+          "instructions": "`finding` is one code-review finding written against a task specification. Is it purely a style or preference remark (naming, formatting, ordering, wording, idiom choice) with no claim about correctness, behavior, the task's acceptance criteria, or scope?",
+          "type": "noul"
+        }
+      },
+      "state": {
+        "finding": {
+          "body": "`saveMappings()` writes into the directory the running batch is\nscrubbing, so an editor save during a batch can replace a file the\nworker is about to read. Write to a staging path and move it into\nplace once the batch is idle.",
+          "file": "src/shell/editor.cpp:412",
+          "id": "R6-06",
+          "severity": "high",
+          "title": "Mapping editor writes to the batch working directory"
+        },
+        "responses": [
+          "the editor cannot be open during a batch, so the two never overlap and staging would be dead code.",
+          "fixed after R6-01 showed the guard was missing on two entry points: `saveMappings` now writes `mappings.staged` and moves it in `onBatchIdle`, in `src/shell/editor.cpp:430`. Test: `editor_save_during_batch_stages`."
+        ]
+      }
+    }
+  ],
+  "round-02.md": [
+    {
+      "questions": {
+        "response_0": {
+          "criteria": {
+            "agree": "Accepts the finding without claiming a fix yet, e.g. 'will do', 'agreed, next round'.",
+            "concern": "Disputes the finding by argument or opinion only, with nothing checkable named.",
+            "evidence": "Disputes the finding by pointing at something checkable: a code citation with a path or line, an existing test, a command output, or a reproduction.",
+            "fixed": "Says a change was made and names where or how (a function, file, commit, or test), addressing the finding.",
+            "question": "Asks the reviewer for clarification or more information instead of fixing or disputing."
+          },
+          "instructions": "`responses[0]` is the implementer's reply to `finding`. Classify the reply by what it does, not by whether it is right.",
+          "type": "choice"
+        },
+        "style_only": {
+          "criteria": {
+            "false": "The finding claims a bug, a missing behavior, a test gap, a violated acceptance criterion, or work outside the allowed scope.",
+            "true": "The finding would not change what the program does or whether the task's acceptance passes; it is taste."
+          },
+          "instructions": "`finding` is one code-review finding written against a task specification. Is it purely a style or preference remark (naming, formatting, ordering, wording, idiom choice) with no claim about correctness, behavior, the task's acceptance criteria, or scope?",
+          "type": "noul"
+        }
+      },
+      "state": {
+        "finding": {
+          "body": "`Parse` keeps its fence flag in a package-level variable, so a file\nthat ends inside an unclosed fence leaves the next call starting in\nfenced mode and every header in the second file is swallowed. Make it\nlocal to the call.",
+          "file": "internal/review/parse.go:61",
+          "id": "R1-01",
+          "severity": "medium",
+          "title": "Fence flag is never reset between files"
+        },
+        "responses": [
+          "fixed: the flag is a local in `Parse` (`internal/review/parse.go:63`), so each call starts outside a fence. Test: `TestParseUnclosedFenceDoesNotLeak`, which parses a file ending mid-fence and then a normal file."
+        ]
+      }
+    },
+    {
+      "questions": {
+        "style_only": {
+          "criteria": {
+            "false": "The finding claims a bug, a missing behavior, a test gap, a violated acceptance criterion, or work outside the allowed scope.",
+            "true": "The finding would not change what the program does or whether the task's acceptance passes; it is taste."
+          },
+          "instructions": "`finding` is one code-review finding written against a task specification. Is it purely a style or preference remark (naming, formatting, ordering, wording, idiom choice) with no claim about correctness, behavior, the task's acceptance criteria, or scope?",
+          "type": "noul"
+        }
+      },
+      "state": {
+        "finding": {
+          "body": "Every method on the parser takes `p`, which collides in the reader's\nhead with the `parser` type itself in the one place both appear. This\nis taste; the code works.",
+          "file": "internal/review/parse.go:95",
+          "id": "R1-02",
+          "severity": "low",
+          "title": "`p` reads poorly for the parser receiver"
+        },
+        "responses": []
+      }
+    },
+    {
+      "questions": {
+        "response_0": {
+          "criteria": {
+            "agree": "Accepts the finding without claiming a fix yet, e.g. 'will do', 'agreed, next round'.",
+            "concern": "Disputes the finding by argument or opinion only, with nothing checkable named.",
+            "evidence": "Disputes the finding by pointing at something checkable: a code citation with a path or line, an existing test, a command output, or a reproduction.",
+            "fixed": "Says a change was made and names where or how (a function, file, commit, or test), addressing the finding.",
+            "question": "Asks the reviewer for clarification or more information instead of fixing or disputing."
+          },
+          "instructions": "`responses[0]` is the implementer's reply to `finding`. Classify the reply by what it does, not by whether it is right.",
+          "type": "choice"
+        },
+        "style_only": {
+          "criteria": {
+            "false": "The finding claims a bug, a missing behavior, a test gap, a violated acceptance criterion, or work outside the allowed scope.",
+            "true": "The finding would not change what the program does or whether the task's acceptance passes; it is taste."
+          },
+          "instructions": "`finding` is one code-review finding written against a task specification. Is it purely a style or preference remark (naming, formatting, ordering, wording, idiom choice) with no claim about correctness, behavior, the task's acceptance criteria, or scope?",
+          "type": "noul"
+        }
+      },
+      "state": {
+        "finding": {
+          "body": "A `- severity: high` line placed after the first paragraph of the body\nis treated as body text, so a round written with the metadata below\nthe summary loses its severity.",
+          "file": "internal/review/parse.go:104",
+          "id": "R1-03",
+          "severity": "medium",
+          "title": "Metadata lines after the body are silently dropped"
+        },
+        "responses": [
+          "that is the format, not a defect: the spec says metadata lines are the ones \"immediately after the header\", and `.overseer/PLAN.md` fixes the same order. The parser test `TestParseMetadataStopsAtFirstOtherLine` pins it."
+        ]
+      }
+    }
+  ],
+  "round-03.md": [
+    {
+      "questions": {
+        "response_0": {
+          "criteria": {
+            "agree": "Accepts the finding without claiming a fix yet, e.g. 'will do', 'agreed, next round'.",
+            "concern": "Disputes the finding by argument or opinion only, with nothing checkable named.",
+            "evidence": "Disputes the finding by pointing at something checkable: a code citation with a path or line, an existing test, a command output, or a reproduction.",
+            "fixed": "Says a change was made and names where or how (a function, file, commit, or test), addressing the finding.",
+            "question": "Asks the reviewer for clarification or more information instead of fixing or disputing."
+          },
+          "instructions": "`responses[0]` is the implementer's reply to `finding`. Classify the reply by what it does, not by whether it is right.",
+          "type": "choice"
+        },
+        "style_only": {
+          "criteria": {
+            "false": "The finding claims a bug, a missing behavior, a test gap, a violated acceptance criterion, or work outside the allowed scope.",
+            "true": "The finding would not change what the program does or whether the task's acceptance passes; it is taste."
+          },
+          "instructions": "`finding` is one code-review finding written against a task specification. Is it purely a style or preference remark (naming, formatting, ordering, wording, idiom choice) with no claim about correctness, behavior, the task's acceptance criteria, or scope?",
+          "type": "noul"
+        }
+      },
+      "state": {
+        "finding": {
+          "body": "Every error from decoding a 200 response becomes a `ResponseError`,\nwith the original error reduced to text. A server that sends headers\nand a partial JSON body, then stalls, makes `--timeout 50ms` exit 7\nwith type `response`. SIGINT during the same read also exits 7.\nThese must exit 8 (`network`) and 130 (`interrupted`), respectively.\nPreserve transport and context errors as `NetworkError` with the\noriginal cause. Reserve `ResponseError` for invalid response content.\nAdd tests that interrupt or time out while reading the response body.\nExisting tests cover a closed server and injected sleep cancellation,\nso they do not exercise this failure.",
+          "file": "internal/jev/jev.go:266",
+          "id": "R1-01",
+          "severity": "blocking",
+          "title": "Body-read timeouts and interrupts lose their error types"
+        },
+        "responses": [
+          "fixed. `decodeResponse` now returns a read failure unwrapped, and the new `Client.bodyError` classifies it: if the root ctx is done it returns `NetworkError{ctx.Err()}` (exit 130 on SIGINT), else `isReadFailure` treats `context.Canceled`, `context.DeadlineExceeded`, and any `net.Error` (which covers both timeouts and transport errors) as `NetworkError` (exit 8). Only content faults stay `ResponseError`. Tests: `TestBodyReadFailuresKeepTheirType` in `internal/jev/jev_test.go` drives a stub transport whose body stalls mid-JSON and then returns a `net.Error` timeout, `context.DeadlineExceeded`, or a reset with the ctx cancelled; each asserts `NetworkError` and, for the latter two, `errors.Is` on the wrapped cause. Judgment call worth flagging: a truncated body that yields `io.ErrUnexpectedEOF` with no net or ctx error is classified as `ResponseError`, not `NetworkError` — amendment 2 enumerates transport/timeout/ctx causes, and that error is indistinguishable from a genuinely truncated document."
+        ]
+      }
+    },
+    {
+      "questions": {
+        "response_0": {
+          "criteria": {
+            "agree": "Accepts the finding without claiming a fix yet, e.g. 'will do', 'agreed, next round'.",
+            "concern": "Disputes the finding by argument or opinion only, with nothing checkable named.",
+            "evidence": "Disputes the finding by pointing at something checkable: a code citation with a path or line, an existing test, a command output, or a reproduction.",
+            "fixed": "Says a change was made and names where or how (a function, file, commit, or test), addressing the finding.",
+            "question": "Asks the reviewer for clarification or more information instead of fixing or disputing."
+          },
+          "instructions": "`responses[0]` is the implementer's reply to `finding`. Classify the reply by what it does, not by whether it is right.",
+          "type": "choice"
+        },
+        "style_only": {
+          "criteria": {
+            "false": "The finding claims a bug, a missing behavior, a test gap, a violated acceptance criterion, or work outside the allowed scope.",
+            "true": "The finding would not change what the program does or whether the task's acceptance passes; it is taste."
+          },
+          "instructions": "`finding` is one code-review finding written against a task specification. Is it purely a style or preference remark (naming, formatting, ordering, wording, idiom choice) with no claim about correctness, behavior, the task's acceptance criteria, or scope?",
+          "type": "noul"
+        }
+      },
+      "state": {
+        "finding": {
+          "body": "A single successful `Decode` does not establish the response contract.\nMock 200 bodies of `null` and `{}` both produce exit 0 and an output\nobject with `answers:null`. A valid response followed by ` {}` also\nexits 0, silently discarding the second document. `raw` never calls the\nanswer accessors, so their checks do not catch these cases. Require one\ncomplete response object with the required response structure, and\nrequire EOF after it. Invalid responses must return `ResponseError`\nand exit 7 without success output. Add cases for null, missing response\nfields, and trailing data beside the existing `not json` test.",
+          "file": "internal/jev/jev.go:264",
+          "id": "R1-02",
+          "severity": "blocking",
+          "title": "Invalid response documents are reported as successful judgments"
+        },
+        "responses": [
+          "fixed. `decodeResponse` replaces the single `Decode`. It decodes one `json.RawMessage`, requires EOF after it (`requireEOF`), then requires the value to be a JSON object with an `answers` member that unmarshals to a non-nil map. `null`, `{}`, `{\"answers\":null}`, `{\"answers\":[]}`, `[1,2]`, a trailing document, and `not json` all return `*ResponseError` with no response value. Tests: `TestResponseValidity` (9 cases, `internal/jev`) and `TestRawRejectsInvalidResponses` (`internal/cli`) which asserts exit 7, type `response`, and empty stdout end to end. Verified the CLI test fails against pre-fix `jev.go`: `null`, `empty_object`, `null_answers`, and `trailing_document` all failed before the change."
+        ]
+      }
+    },
+    {
+      "questions": {
+        "response_0": {
+          "criteria": {
+            "agree": "Accepts the finding without claiming a fix yet, e.g. 'will do', 'agreed, next round'.",
+            "concern": "Disputes the finding by argument or opinion only, with nothing checkable named.",
+            "evidence": "Disputes the finding by pointing at something checkable: a code citation with a path or line, an existing test, a command output, or a reproduction.",
+            "fixed": "Says a change was made and names where or how (a function, file, commit, or test), addressing the finding.",
+            "question": "Asks the reviewer for clarification or more information instead of fixing or disputing."
+          },
+          "instructions": "`responses[0]` is the implementer's reply to `finding`. Classify the reply by what it does, not by whether it is right.",
+          "type": "choice"
+        },
+        "style_only": {
+          "criteria": {
+            "false": "The finding claims a bug, a missing behavior, a test gap, a violated acceptance criterion, or work outside the allowed scope.",
+            "true": "The finding would not change what the program does or whether the task's acceptance passes; it is taste."
+          },
+          "instructions": "`finding` is one code-review finding written against a task specification. Is it purely a style or preference remark (naming, formatting, ordering, wording, idiom choice) with no claim about correctness, behavior, the task's acceptance criteria, or scope?",
+          "type": "noul"
+        }
+      },
+      "state": {
+        "finding": {
+          "body": "The deferred cleanup only closes the body. `readErrBody` consumes at\nmost 500 bytes, leaving larger error bodies unread. The success path\nalso stops after one decoded value. This violates the brief's drain\nrequirement and can prevent HTTP connection reuse across retries.\nKeep the accepted 500-byte diagnostic limit, but drain the remaining\nbody before closing, within the attempt's timeout and cancellation\nboundaries. Add a tracking response-body test that checks both EOF\nconsumption and Close on success, decode failure, and retry paths.\nThe missing drain is confirmed by source inspection. A local HTTP/1.1\nserver with 64 KiB error bodies also observed new connections across\nthe three attempts.",
+          "file": "internal/jev/jev.go:262",
+          "id": "R1-03",
+          "severity": "minor",
+          "title": "Response bodies are closed without being fully drained"
+        },
+        "responses": [
+          "fixed. `drainClose` replaces the close-only deferred cleanup on every path: `io.Copy(io.Discard, io.LimitReader(body, 1<<16))` then `Close`. `drainLimit` is a named constant beside `maxErrBody`; the 500-byte diagnostic cap is unchanged. Test: `TestBodiesAreDrainedAndClosed` uses a `trackingBody` that records EOF consumption and `Close`, over the success, decode-failure, and retry (500 then 200) paths, asserting both flags on every body the client consumed. The stub transport is how the body gets injected — `httptest` gives no handle on it."
+        ]
+      }
+    },
+    {
+      "questions": {
+        "response_0": {
+          "criteria": {
+            "agree": "Accepts the finding without claiming a fix yet, e.g. 'will do', 'agreed, next round'.",
+            "concern": "Disputes the finding by argument or opinion only, with nothing checkable named.",
+            "evidence": "Disputes the finding by pointing at something checkable: a code citation with a path or line, an existing test, a command output, or a reproduction.",
+            "fixed": "Says a change was made and names where or how (a function, file, commit, or test), addressing the finding.",
+            "question": "Asks the reviewer for clarification or more information instead of fixing or disputing."
+          },
+          "instructions": "`responses[0]` is the implementer's reply to `finding`. Classify the reply by what it does, not by whether it is right.",
+          "type": "choice"
+        },
+        "style_only": {
+          "criteria": {
+            "false": "The finding claims a bug, a missing behavior, a test gap, a violated acceptance criterion, or work outside the allowed scope.",
+            "true": "The finding would not change what the program does or whether the task's acceptance passes; it is taste."
+          },
+          "instructions": "`finding` is one code-review finding written against a task specification. Is it purely a style or preference remark (naming, formatting, ordering, wording, idiom choice) with no claim about correctness, behavior, the task's acceptance criteria, or scope?",
+          "type": "noul"
+        }
+      },
+      "state": {
+        "finding": {
+          "body": "No arguments and an unknown verb return `exitUsage` directly after\nprinting help. Both exit 2, but the last stderr line is\n`130  interrupted (SIGINT)`, not a JSON error record. This breaks the\ndocumented machine-readable failure contract. After printing help,\nroute both branches through `reportError` with a `usageError`.\nExtend `TestNoArgsAndUnknownVerb` to assert the final record's `usage`\ntype, as the other CLI failure tests already do.",
+          "file": "internal/cli/cli.go:100",
+          "id": "R1-04",
+          "severity": "blocking",
+          "title": "Top-level usage failures omit the final JSON error record"
+        },
+        "responses": [
+          "fixed. Both branches in `Run` now print top-level help to stderr and then return `reportError(stderr, usagef(...))`, so the JSON record is the final stderr line and the code stays 2. Tests: `TestNoArgsAndUnknownVerb` gained an `errType` assertion, and the new `TestEveryFailureEndsWithOneErrorRecord` asserts the file-wide invariant across no-args, unknown verb, bad input, no key, and a 401 — exactly one parseable error record in stderr, and it is the last line. Verified both fail against pre-fix `cli.go`."
+        ]
+      }
+    },
+    {
+      "questions": {
+        "response_0": {
+          "criteria": {
+            "agree": "Accepts the finding without claiming a fix yet, e.g. 'will do', 'agreed, next round'.",
+            "concern": "Disputes the finding by argument or opinion only, with nothing checkable named.",
+            "evidence": "Disputes the finding by pointing at something checkable: a code citation with a path or line, an existing test, a command output, or a reproduction.",
+            "fixed": "Says a change was made and names where or how (a function, file, commit, or test), addressing the finding.",
+            "question": "Asks the reviewer for clarification or more information instead of fixing or disputing."
+          },
+          "instructions": "`responses[0]` is the implementer's reply to `finding`. Classify the reply by what it does, not by whether it is right.",
+          "type": "choice"
+        },
+        "style_only": {
+          "criteria": {
+            "false": "The finding claims a bug, a missing behavior, a test gap, a violated acceptance criterion, or work outside the allowed scope.",
+            "true": "The finding would not change what the program does or whether the task's acceptance passes; it is taste."
+          },
+          "instructions": "`finding` is one code-review finding written against a task specification. Is it purely a style or preference remark (naming, formatting, ordering, wording, idiom choice) with no claim about correctness, behavior, the task's acceptance criteria, or scope?",
+          "type": "noul"
+        }
+      },
+      "state": {
+        "finding": {
+          "body": "`Decoder.More()` is not an EOF check. A valid request followed by `]`,\n`}`, or `] {}` passes validation and exits 0 under `--dry-run`. A live\ninvocation would send the truncated request. Although task 001 names\n`More()`, this contradicts its requirement for exactly one JSON object.\nPerform a second decode and require `io.EOF`, rejecting every other\nresult as a usage error. Add these suffixes to the input tests. The\nexisting `{} trailing` case does not expose this defect.",
+          "file": "internal/cli/raw.go:116",
+          "id": "R1-05",
+          "severity": "blocking",
+          "title": "The raw parser accepts malformed trailing delimiters"
+        },
+        "responses": [
+          "fixed, per amendment 6. `rawBody` now decodes a second `json.RawMessage` and requires `io.EOF`; every other result, including a syntax error, is a usage error. Tests: `TestRawUsageErrors` gained `]`, `}`, `] {}`, and two-objects cases. Verified the first three fail against pre-fix `raw.go` (the two-objects case passed before, since `More()` does catch a buffered second object — that is why it was not enough)."
+        ]
+      }
+    },
+    {
+      "questions": {
+        "response_0": {
+          "criteria": {
+            "agree": "Accepts the finding without claiming a fix yet, e.g. 'will do', 'agreed, next round'.",
+            "concern": "Disputes the finding by argument or opinion only, with nothing checkable named.",
+            "evidence": "Disputes the finding by pointing at something checkable: a code citation with a path or line, an existing test, a command output, or a reproduction.",
+            "fixed": "Says a change was made and names where or how (a function, file, commit, or test), addressing the finding.",
+            "question": "Asks the reviewer for clarification or more information instead of fixing or disputing."
+          },
+          "instructions": "`responses[0]` is the implementer's reply to `finding`. Classify the reply by what it does, not by whether it is right.",
+          "type": "choice"
+        },
+        "style_only": {
+          "criteria": {
+            "false": "The finding claims a bug, a missing behavior, a test gap, a violated acceptance criterion, or work outside the allowed scope.",
+            "true": "The finding would not change what the program does or whether the task's acceptance passes; it is taste."
+          },
+          "instructions": "`finding` is one code-review finding written against a task specification. Is it purely a style or preference remark (naming, formatting, ordering, wording, idiom choice) with no claim about correctness, behavior, the task's acceptance criteria, or scope?",
+          "type": "noul"
+        }
+      },
+      "state": {
+        "finding": {
+          "body": "Error bodies flow unchanged into `RequestError` or `ServerError`, then\ninto the CLI's final stderr record. A local server returning HTTP 422\nwith the received Authorization header as its body reproduced this:\nthe stderr message contained `Bearer review-fake-token`, the synthetic\nAPI key used for the check. An upstream diagnostic that echoes a\ncredential therefore violates the brief's explicit secrecy requirement.\nRemove the configured key from externally supplied diagnostics before\nthey can reach errors or output. Preserve the accepted body truncation\nbehavior. Add fake-key echo tests for request and server errors,\nincluding debug logging, and assert the key is absent from both streams.",
+          "file": "internal/jev/jev.go:275",
+          "id": "R1-06",
+          "severity": "blocking",
+          "title": "Echoed credentials reach stderr through error response bodies"
+        },
+        "responses": [
+          "fixed. `Client.redact` replaces every occurrence of the configured key with `[redacted]`, and is applied to `readErrBody` output before it reaches `RequestError` or the `retryable` that becomes `ServerError`, and to `ResponseError` messages built from body text. It is a no-op when the key is empty. Truncation is unchanged. Tests: `TestEchoedKeyIsRedacted` (422 and 500, the latter with one body per retry attempt), `TestEchoedKeyIsRedactedInResponseErrors`, `TestRedactSkipsEmptyKey`, and end to end `TestEchoedKeyNeverReachesAnyStream`, which runs with `--log-level debug` against a server echoing the Authorization header and asserts the fake key is in neither stdout nor stderr and that `[redacted]` is present. Verified both end-to-end cases fail against pre-fix `jev.go`. Note the scope limit: this redacts the configured key only. A body echoing some *other* secret is still passed through truncated."
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+• Ran cargo test --workspace --quiet
+  └ running 42 tests
+    ..........................................
+    test result: ok. 42 passed; 0 failed; 0 ignored
+
+• Explored
+  └ Read src/session/mod.rs, src/session/tail.rs
+
+• I'll move the faint-span pass in front of strip_ansi, since it
+  needs the escapes that strip_ansi throws away.
+
+• Edited src/session/tail.rs (+18 -4)
+    36   pub fn clean(raw: &str, max_lines: usize) -> String {
+    37 -     let stripped = strip_ansi(raw);
+    37 +     let stripped = strip_ansi(&drop_faint(raw));
+    38       stripped
+    39           .lines()
+    40           .rev()
+    41           .take(max_lines)
+    42           .collect::<Vec<_>>()
+
+• Ran cargo fmt --all
+  └ (no output)
+
+• Ran cargo clippy --workspace -- -D warnings
+  └ Checking herdr v0.4.1 (/home/joshua/Projects/personal/herdr)
+    Finished `dev` profile [unoptimized] target(s) in 3.91s
+
+• Ran cargo test --workspace --quiet
+  └ running 45 tests
+    .............................................
+    test result: ok. 45 passed; 0 failed; 0 ignored
+
+• Now the CLI flag so `herdr agent read` can ask for the ansi
+  source instead of the cooked one.
+
+• Edited src/cli/agent.rs (+9 -1)
+
+▌ Working (12s • esc to interrupt)

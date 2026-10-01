@@ -1,0 +1,44 @@
+● I'll add the tmux driver behind the same interface the Herdr
+  driver already uses, then wire it into the registry.
+
+● Read(internal/driver/herdr.go)
+  ⎿  Read 142 lines (ctrl+o to expand)
+
+● The interface is four methods: Panes, Read, Send, Submit. tmux
+  covers all four with capture-pane and send-keys. The capture
+  call needs -e so escapes survive; without them the faint-span
+  trick cannot tell a ghost suggestion from typed input.
+
+● Update(internal/driver/tmux.go)
+  ⎿  Updated internal/driver/tmux.go with 34 additions and 2
+     removals
+       11 +  // capturePane returns the last n lines of pane id,
+       12 +  // escape sequences included.
+       13 +  func (d *Tmux) capturePane(
+       14 +    id string, n int,
+       15 +  ) (string, error) {
+       16 +    out, err := exec.Command(
+       17 +      "tmux", "capture-pane", "-p", "-e",
+       18 +      "-S", "-"+strconv.Itoa(n), "-t", id,
+       19 +    ).Output()
+       20 +    if err != nil {
+       21 +      return "", fmt.Errorf("capture-pane %s: %w", id, err)
+       22 +    }
+       23 +
+       24 +    return string(out), nil
+       25 +  }
+
+● Bash(go build ./...)
+  ⎿  (No content)
+
+● Bash(go test ./internal/driver/ -count=1)
+  ⎿  ok  	herdr/internal/driver	0.084s
+
+● Build and the driver tests pass. Two cases left: the registry
+  lookup for an unknown backend, and a capture round-trip against
+  a real tmux socket.
+
+● Update(internal/driver/tmux_test.go)
+  ⎿  Updated internal/driver/tmux_test.go with 26 additions
+
+✶ Wrangling… (esc to interrupt · 1m 14s · ↓ 2.1k tokens)
