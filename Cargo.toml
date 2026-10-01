@@ -1,0 +1,41 @@
+[package]
+name = "overseer-judge"
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.98"
+description = "Typed verdicts for overseer judgments (pane state, task-file lint, review typing) via TypeSafe's Jev"
+license = "MIT"
+repository = "https://github.com/photuris/overseer-judge"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+ctrlc = "3"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+
+[dev-dependencies]
+assert_cmd = "2"
+httpmock = "0.8"
+rstest = "0.27"
+tempfile = "3"
+
+[profile.release]
+strip = true
+lto = "fat"
+codegen-units = 1
+
+[lints.rust]
+missing_docs = "warn"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+expect_used = "deny"
+unwrap_used = "deny"
+missing_docs_in_private_items = "warn"
+missing_errors_doc = "warn"
+missing_panics_doc = "warn"
