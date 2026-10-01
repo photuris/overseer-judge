@@ -176,6 +176,14 @@ fn assert_failure(out: &Output, code: i32, kind: &str) -> Value {
     records[0].1.clone()
 }
 
+/// Asserts `out` exited 130 and that stderr is exactly one line: the
+/// `interrupted` error record.
+#[cfg(unix)]
+fn assert_interrupted(out: &Output) {
+    assert_failure(out, 130, "interrupted");
+    assert_eq!(stderr(out).lines().count(), 1, "stderr: {}", stderr(out));
+}
+
 /// Returns a base URL on which nothing listens.
 fn unreachable_url() -> String {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -801,7 +809,33 @@ fn should_exit_130_on_sigint() {
     interrupt(child.id());
     let out = child.wait_with_output().unwrap();
 
-    assert_failure(&out, 130, "interrupted");
+    assert_interrupted(&out);
+}
+
+#[cfg(unix)]
+#[test]
+fn should_exit_130_on_sigint_during_connect() {
+    let sandbox = Sandbox::new();
+    let path = sandbox.file("raw.json", RAW_INPUT);
+
+    // A non-routable address, so the connect blocks until the signal
+    // interrupts it (EINTR).
+    let child = sandbox
+        .command(
+            "http://10.255.255.1",
+            Some(KEY),
+            &["raw", "--input", path.to_str().unwrap(), "--timeout", "30s"],
+        )
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    thread::sleep(Duration::from_millis(300));
+    interrupt(child.id());
+    let out = child.wait_with_output().unwrap();
+
+    assert_interrupted(&out);
 }
 
 #[cfg(unix)]
@@ -835,5 +869,5 @@ fn should_exit_130_on_sigint_while_reading_stdin() {
         },
     };
 
-    assert_failure(&out, 130, "interrupted");
+    assert_interrupted(&out);
 }

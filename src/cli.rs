@@ -11,6 +11,7 @@ use std::{
     fs,
     io::{self, Read, Write},
     iter,
+    sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
 
@@ -47,6 +48,26 @@ const EXIT_RATE_LIMIT: i32 = 6;
 const EXIT_UPSTREAM: i32 = 7;
 /// A network failure or timeout.
 const EXIT_NETWORK: i32 = 8;
+/// SIGINT arrived.
+pub const EXIT_INTERRUPTED: i32 = 130;
+
+// ── Interrupt ───────────────────────────────────────────────────────────────
+
+/// Set by the SIGINT handler before anything else, so a failure the
+/// signal caused (such as EINTR) is reported as the interrupt.
+pub static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+
+/// Claimed by whichever thread writes the `interrupted` record, so it
+/// is written once.
+pub static REPORTED: AtomicBool = AtomicBool::new(false);
+
+/// Writes the `interrupted` error record to `stderr` unless another
+/// thread already claimed it.
+pub fn report_interrupted(stderr: &mut dyn Write) {
+    if !REPORTED.swap(true, Ordering::SeqCst) {
+        write_record(stderr, "interrupted", "interrupted", 0);
+    }
+}
 
 // ── Help text ───────────────────────────────────────────────────────────────
 
@@ -692,6 +713,12 @@ pub fn run(
         return EXIT_OK;
     };
 
+    if INTERRUPTED.load(Ordering::SeqCst) {
+        report_interrupted(stderr);
+
+        return EXIT_INTERRUPTED;
+    }
+
     let (kind, status, code) = err.classify();
     let mut message = err.to_string();
 
@@ -720,6 +747,11 @@ fn report_clap(
     ) {
         return match write!(stdout, "{text}").and_then(|()| stdout.flush()) {
             Ok(()) => EXIT_OK,
+            Err(_) if INTERRUPTED.load(Ordering::SeqCst) => {
+                report_interrupted(stderr);
+
+                EXIT_INTERRUPTED
+            }
             Err(err) => {
                 write_record(
                     stderr,

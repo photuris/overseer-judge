@@ -1,28 +1,32 @@
 //! Entry point for overseer-judge: installs the SIGINT handler and runs
 //! the CLI.
 
-use std::{io, process};
+use std::{io, process, sync::atomic::Ordering};
 
-/// The error record written when SIGINT arrives.
-const INTERRUPTED: &str =
-    "{\"error\":{\"type\":\"interrupted\",\"message\":\"interrupted\"}}\n";
+use overseer_judge::cli::{self, EXIT_INTERRUPTED, INTERRUPTED};
 
-/// Installs the SIGINT handler, then exits with [`overseer_judge::cli::run`]'s code.
+/// Installs the SIGINT handler, then exits with [`cli::run`]'s code, or
+/// 130 once SIGINT has been seen.
 fn main() {
     // Without a handler, SIGINT still ends the process, only without
     // the record and with the signal's own status; nothing to recover.
     let _ = ctrlc::set_handler(|| {
-        // The process is exiting either way; a failed write changes
-        // nothing.
-        let _ =
-            io::Write::write_all(&mut io::stderr(), INTERRUPTED.as_bytes());
-        process::exit(130);
+        INTERRUPTED.store(true, Ordering::SeqCst);
+        cli::report_interrupted(&mut io::stderr());
+        process::exit(EXIT_INTERRUPTED);
     });
 
-    process::exit(overseer_judge::cli::run(
+    let code = cli::run(
         std::env::args_os().skip(1).collect(),
         &mut io::stdin(),
         &mut io::stdout(),
         &mut io::stderr(),
-    ));
+    );
+
+    if INTERRUPTED.load(Ordering::SeqCst) {
+        cli::report_interrupted(&mut io::stderr());
+        process::exit(EXIT_INTERRUPTED);
+    }
+
+    process::exit(code);
 }
