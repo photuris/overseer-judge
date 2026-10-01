@@ -1,0 +1,89 @@
+# overseer-judge — agent instructions
+
+A Rust CLI that turns overseer judgments into typed JSON verdicts. It
+asks TypeSafe's System One (Jev) model, so the overseer skill can move
+those judgments off an expensive reasoning model.
+
+## Layout
+
+```
+Cargo.toml  Cargo.lock  rustfmt.toml  clippy.toml  .editorconfig
+.gitignore  LICENSE  README.md  AGENTS.md  CLAUDE.md
+.cargo/config.toml            crt-static for windows-msvc targets
+.github/workflows/ci.yml      fmt, clippy, test (ubuntu + windows)
+.github/workflows/release.yml tag v* -> six archives + checksums
+src/main.rs                   SIGINT handler, exit(cli::run(...))
+src/lib.rs                    crate docs, module list
+src/cli.rs                    clap types, run, verbs, help, exit
+                              codes, error record
+src/config.rs                 base URL, model, API key
+src/jev.rs                    HTTP client, typed request/response,
+                              typed errors, retries
+src/session.rs                verb: transcript-tail classification
+src/session/clean.rs          pane cleaning, input line, activity
+                              hint
+src/tasklint.rs               verb: task-file lint
+src/review.rs                 verb: review-item typing
+tests/cli.rs                  integration tests of the binary
+tests/live.rs                 #[ignore] live API tests
+tests/fixtures/               session, tasklint, review fixtures;
+                              cli/ help snapshots
+```
+
+Unit tests sit beside the code in `#[cfg(test)] mod tests`.
+
+## Rules
+
+- Lint and format configuration lives in `Cargo.toml` (`[lints]`),
+  `clippy.toml`, and `rustfmt.toml`. Wrap at 79 columns
+  (`max_width = 79`).
+- stdout carries data only. Diagnostics go to stderr through
+  `tracing`.
+- Every item, public or private, gets a doc comment.
+- No new dependencies without a reason in the commit message.
+
+## Question wording
+
+Each judgment's exact question text lives in the module that sends
+it: `src/session.rs`, `src/tasklint.rs`, `src/review.rs`. The wording
+is versioned with the code that sends it, so read the module when you
+need the current text.
+
+Use `--dry-run` to read a request without sending it:
+
+```sh
+overseer-judge session --dry-run \
+  --input tests/fixtures/session/idle-01.txt | jq .body.questions
+```
+
+## Tests
+
+```sh
+cargo fmt --check
+cargo clippy --all-targets --locked -- -D warnings
+cargo test --locked
+```
+
+The live tests call the real API and record the measurement this POC
+exists to produce. They need a key and they cost tokens:
+
+```sh
+cargo test --locked --test live -- --ignored
+```
+
+A live test skips, printing `skipped: no key`, when no API key is
+configured.
+
+## Credentials
+
+The key comes from `TYPESAFE_API_KEY`, else from `~/.config/jev`
+(`$XDG_CONFIG_HOME/jev` when that variable is set). The file holds the
+bare token. No flag carries the key: argv is visible in the process
+list.
+
+## `.overseer/`
+
+`.overseer/` is the local run ledger for the overseer workflow:
+`PLAN.md`, `STATE.md`, the task files, and the review rounds. Git
+ignores it, so a fresh clone has none. When one exists, do not edit it
+except the `Result` section of the task you were given.
