@@ -1,0 +1,37 @@
+Turns overseer judgments into typed JSON verdicts via TypeSafe's System One (Jev) API.
+
+Usage: overseer-judge [OPTIONS] <COMMAND>
+
+Commands:
+  raw      send an arbitrary Jev request read from --input
+  session  classify an agent pane's transcript tail read from --input
+  task     lint an overseer task file for spec defects
+  review   type each item and response in an overseer review round file
+
+Options:
+      --pretty[=<PRETTY>]    Indent JSON output
+      --dry-run[=<DRY_RUN>]  Print the request that would be sent and exit 0
+      --model <name>         Jev model (default from TYPESAFE_DEFAULT_MODEL)
+      --timeout <duration>   Timeout for each HTTP attempt; 0 or negative disables it [default: 10s]
+      --log-level <level>    Stderr diagnostics [default: warn] [possible values: debug, info, warn, error]
+  -h, --help                 Print help
+  -V, --version              Print version
+
+Input:
+  --input <path|->      read JSON from a file, or -
+                        for stdin.
+
+stdout is data only: one JSON document, compact
+unless --pretty. Failures print one JSON object as
+the last stderr line.
+
+Exit codes:
+  0    success
+  1    unexpected failure
+  2    usage: bad flags, missing argument, bad input
+  3    authentication failed or no API key
+  5    request rejected (422 or other 4xx)
+  6    rate limited after retries
+  7    upstream error (5xx after retries, or an invalid response)
+  8    network failure or timeout
+  130  interrupted (SIGINT)

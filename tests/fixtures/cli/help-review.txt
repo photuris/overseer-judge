@@ -1,0 +1,21 @@
+type each item and response in an overseer review round file
+
+Usage: overseer-judge review [OPTIONS] <path|->
+
+Arguments:
+  <path|->  Review round file; - reads stdin
+
+Options:
+      --pretty[=<PRETTY>]    Indent JSON output
+      --dry-run[=<DRY_RUN>]  Print the request that would be sent and exit 0
+      --model <name>         Jev model (default from TYPESAFE_DEFAULT_MODEL)
+      --timeout <duration>   Timeout for each HTTP attempt; 0 or negative disables it [default: 10s]
+      --log-level <level>    Stderr diagnostics [default: warn] [possible values: debug, info, warn, error]
+  -h, --help                 Print help
+  -V, --version              Print version
+
+Output: JSON Lines, one object per item: id, severity, style_only, responses, model, usage. --pretty is rejected: a record stays on one line.
+
+Example:
+  overseer-judge review .overseer/reviews/round-04.md |
+    jq -c 'select(.style_only > 0.5)'

@@ -1,0 +1,28 @@
+classify an agent pane's transcript tail read from --input
+
+Usage: overseer-judge session [OPTIONS] --input <path|->
+
+Options:
+      --input <path|->       Transcript tail; - reads stdin
+      --pretty[=<PRETTY>]    Indent JSON output
+      --agent <kind>         Agent kind [default: unknown] [possible values: claude, codex, pi, opencode, unknown]
+      --dry-run[=<DRY_RUN>]  Print the request that would be sent and exit 0
+      --model <name>         Jev model (default from TYPESAFE_DEFAULT_MODEL)
+      --timeout <duration>   Timeout for each HTTP attempt; 0 or negative disables it [default: 10s]
+      --log-level <level>    Stderr diagnostics [default: warn] [possible values: debug, info, warn, error]
+  -h, --help                 Print help
+  -V, --version              Print version
+
+Output: the verdict as one JSON object: state, confidence, probabilities, coherent, input_line, activity_hint, model, usage.
+
+Example:
+  # ANSI input is preferred. Only ANSI lets the tool
+  # drop an agent's greyed-out prompt suggestion,
+  # which in plain text is indistinguishable from
+  # text the user typed and has not submitted.
+  herdr agent read <pane> --lines 60 \
+    --source recent-unwrapped --format ansi |
+    overseer-judge session --input - --agent claude
+
+  tmux capture-pane -p -e -J -S -60 -t <pane> |
+    overseer-judge session --input - --agent pi

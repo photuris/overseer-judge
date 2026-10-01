@@ -1,0 +1,21 @@
+send an arbitrary Jev request read from --input
+
+Usage: overseer-judge raw [OPTIONS] --input <path|->
+
+Options:
+      --input <path|->       Request JSON to send; - reads stdin
+      --pretty[=<PRETTY>]    Indent JSON output
+      --dry-run[=<DRY_RUN>]  Print the request that would be sent and exit 0
+      --model <name>         Jev model (default from TYPESAFE_DEFAULT_MODEL)
+      --timeout <duration>   Timeout for each HTTP attempt; 0 or negative disables it [default: 10s]
+      --log-level <level>    Stderr diagnostics [default: warn] [possible values: debug, info, warn, error]
+  -h, --help                 Print help
+  -V, --version              Print version
+
+Output: the System One response as one JSON object.
+
+Example:
+  printf '%s' '{"state":"Payouts have failed for 3 days.",
+    "questions":{"urgent":{"type":"noul",
+    "instructions":"Does this convey urgency?"}}}' |
+    overseer-judge raw --input - --pretty
