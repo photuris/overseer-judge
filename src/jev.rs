@@ -5,11 +5,19 @@
 //! [`Response`] whose accessors return typed answers. Every diagnostic
 //! the client copies from a response has the API key redacted.
 
-use std::{collections::BTreeMap, io::Read, thread, time::Duration};
+use std::{
+    collections::BTreeMap,
+    io::Read,
+    thread,
+    time::{Duration, Instant},
+};
 
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::Value;
-use ureq::{Agent, Body, http};
+use serde_json::{Value, value::RawValue};
+use ureq::{
+    Agent, AsSendBody, Body,
+    http::{self, Uri, header},
+};
 
 /// The System One endpoint, relative to the base URL.
 pub const PATH: &str = "/v1/systemone";
@@ -21,6 +29,9 @@ const RETRY_WAITS: [Duration; 2] =
 
 /// How many bytes of an error response body are kept as its message.
 const MAX_ERR_BODY: u64 = 500;
+
+/// How many redirects one attempt follows before giving up.
+const MAX_REDIRECTS: u32 = 10;
 
 /// Replaces the API key wherever a diagnostic echoes it.
 const REDACTED: &str = "[redacted]";
@@ -79,8 +90,13 @@ pub struct Answer {
     /// The chosen label, for a `choice` answer.
     #[serde(default, skip_serializing_if = "is_none_or_empty_str")]
     pub choice: Option<String>,
-    /// Probability per label, for a `choice` answer.
-    #[serde(default, skip_serializing_if = "is_none_or_empty_map")]
+    /// Probability per label, for a `choice` answer; a `null`
+    /// probability decodes as 0.
+    #[serde(
+        default,
+        deserialize_with = "null_probabilities_zero",
+        skip_serializing_if = "is_none_or_empty_map"
+    )]
     pub probabilities: Option<BTreeMap<String, f64>>,
     /// The score, for a `score` answer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -132,6 +148,25 @@ where
         .into_iter()
         .map(|(id, answer)| (id, answer.unwrap_or_default()))
         .collect())
+}
+
+/// Serde helper: decodes a probabilities map whose `null` values
+/// become 0, as Go's `map[string]float64` does.
+fn null_probabilities_zero<'de, D>(
+    d: D,
+) -> Result<Option<BTreeMap<String, f64>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let probabilities =
+        Option::<BTreeMap<String, Option<f64>>>::deserialize(d)?;
+
+    Ok(probabilities.map(|probabilities| {
+        probabilities
+            .into_iter()
+            .map(|(label, p)| (label, p.unwrap_or_default()))
+            .collect()
+    }))
 }
 
 /// Serde skip predicate: true for `None` and `Some("")`.
@@ -306,8 +341,11 @@ impl Failure {
 /// Sends System One requests over its own HTTP agent.
 // No `Debug` derive: `api_key` must never reach a log line.
 pub struct Client {
-    /// HTTP agent with the configured timeout.
+    /// HTTP agent with the configured timeout; redirects are followed
+    /// by [`Client::follow`], not by the agent.
     agent: Agent,
+    /// Bound on one attempt, redirects included; `None` is unbounded.
+    timeout: Option<Duration>,
     /// Full endpoint URL: base URL plus [`PATH`].
     url: String,
     /// Bearer token sent with every request.
@@ -330,10 +368,13 @@ impl Client {
         let config = Agent::config_builder()
             .timeout_global(timeout)
             .http_status_as_error(false)
+            .max_redirects(0)
+            .max_redirects_will_error(false)
             .build();
 
         Self {
             agent: Agent::new_with_config(config),
+            timeout,
             url: format!("{base_url}{PATH}"),
             api_key: api_key.to_owned(),
             model: model.to_owned(),
@@ -379,6 +420,8 @@ impl Client {
     ///
     /// Status 429 and every 5xx are retried, three attempts in total,
     /// waiting 500 ms then 1 s, or the server's `Retry-After` seconds.
+    /// Redirects are followed as Go's HTTP client does (see
+    /// [`Client::follow`]).
     ///
     /// # Errors
     ///
@@ -406,19 +449,18 @@ impl Client {
     fn attempt(&self, body: &[u8], attempt: u32) -> Result<Response, Failure> {
         tracing::debug!(attempt, bytes = body.len(), "posting to System One");
 
-        let mut resp = self
-            .agent
-            .post(&self.url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .send(body)
-            .map_err(network)?;
+        let mut resp = self.follow(body).map_err(Failure::Final)?;
         let status = resp.status().as_u16();
 
         tracing::debug!(attempt, status, "System One replied");
 
         if status == 200 {
-            let bytes = resp.body_mut().read_to_vec().map_err(network)?;
+            let bytes = resp
+                .body_mut()
+                .with_config()
+                .limit(u64::MAX)
+                .read_to_vec()
+                .map_err(network)?;
 
             tracing::debug!(attempt, bytes = bytes.len(), "read response");
 
@@ -443,6 +485,114 @@ impl Client {
         })
     }
 
+    /// POSTs `body` to the endpoint and returns the response that ends
+    /// its redirect chain.
+    ///
+    /// At most [`MAX_REDIRECTS`] redirects are followed. 301, 302, and
+    /// 303 turn the request into a GET without body; 307 and 308 resend
+    /// it unchanged. `Authorization` goes only to the endpoint's host
+    /// and port.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Network`] on a transport failure, a timeout of the
+    /// whole chain, a missing or invalid `Location`, or too many
+    /// redirects.
+    fn follow(&self, body: &[u8]) -> Result<http::Response<Body>, Error> {
+        let origin = Uri::try_from(self.url.as_str())
+            .map_err(|err| Error::Network(err.to_string()))?;
+        let deadline = self.timeout.map(|timeout| Instant::now() + timeout);
+        let mut url = origin.clone();
+        let mut body = Some(body);
+
+        for followed in 0..=MAX_REDIRECTS {
+            let resp = self
+                .send(&url, body, same_host(&origin, &url), deadline)
+                .map_err(|err| Error::Network(err.to_string()))?;
+            let status = resp.status().as_u16();
+
+            if !matches!(status, 301 | 302 | 303 | 307 | 308) {
+                return Ok(resp);
+            }
+
+            if followed == MAX_REDIRECTS {
+                break;
+            }
+
+            tracing::debug!(status, hop = followed + 1, "following redirect");
+
+            url = resp
+                .headers()
+                .get(header::LOCATION)
+                .and_then(|location| location.to_str().ok())
+                .and_then(|location| resolve(&url, location))
+                .ok_or_else(|| {
+                    Error::Network(format!(
+                        "status {status} without a valid Location"
+                    ))
+                })?;
+
+            if status <= 303 {
+                body = None;
+            }
+        }
+
+        Err(Error::Network(format!(
+            "stopped after {MAX_REDIRECTS} redirects"
+        )))
+    }
+
+    /// Sends one request of a redirect chain: a JSON POST of `body`,
+    /// or a GET when it is `None`, authorized when `authorize` is set,
+    /// with whatever remains of the time until `deadline`.
+    fn send(
+        &self,
+        url: &Uri,
+        body: Option<&[u8]>,
+        authorize: bool,
+        deadline: Option<Instant>,
+    ) -> Result<http::Response<Body>, ureq::Error> {
+        let mut req = http::Request::builder().uri(url.clone());
+
+        if authorize {
+            req = req.header(
+                header::AUTHORIZATION,
+                format!("Bearer {}", self.api_key),
+            );
+        }
+
+        let remaining = deadline.map(|deadline| {
+            deadline.saturating_duration_since(Instant::now())
+        });
+
+        match body {
+            Some(body) => self.run(
+                req.method(http::Method::POST)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(body)?,
+                remaining,
+            ),
+            None => {
+                self.run(req.method(http::Method::GET).body(())?, remaining)
+            }
+        }
+    }
+
+    /// Runs `req` on the agent with `timeout` as its global timeout.
+    fn run(
+        &self,
+        req: http::Request<impl AsSendBody>,
+        timeout: Option<Duration>,
+    ) -> Result<http::Response<Body>, ureq::Error> {
+        let req = self
+            .agent
+            .configure_request(req)
+            .timeout_global(timeout)
+            .build();
+
+        self.agent.run(req)
+    }
+
     /// Replaces every occurrence of the API key in `text`.
     fn redact(&self, text: &str) -> String {
         if self.api_key.is_empty() {
@@ -451,6 +601,47 @@ impl Client {
 
         text.replace(&self.api_key, REDACTED)
     }
+}
+
+/// Reports whether `url` has the same host and port as `origin`.
+fn same_host(origin: &Uri, url: &Uri) -> bool {
+    let hosts_match = origin
+        .host()
+        .zip(url.host())
+        .is_some_and(|(a, b)| a.eq_ignore_ascii_case(b));
+
+    hosts_match && origin.port_u16() == url.port_u16()
+}
+
+/// Resolves a redirect `location` against the URL that returned it.
+///
+/// Returns `None` when `location` is empty or the result is not a
+/// valid URI.
+// ponytail: no dot-segment removal; `../x` is sent as is, which servers
+// normalize. Add RFC 3986 section 5.2.4 if a server ever needs it.
+fn resolve(base: &Uri, location: &str) -> Option<Uri> {
+    let location = location.split('#').next().unwrap_or_default();
+    let scheme = base.scheme_str()?;
+    let authority = base.authority()?;
+    let path = base.path();
+
+    let resolved = if location.is_empty() {
+        return None;
+    } else if location.starts_with("//") {
+        format!("{scheme}:{location}")
+    } else if location.starts_with('/') {
+        format!("{scheme}://{authority}{location}")
+    } else if location.starts_with('?') {
+        format!("{scheme}://{authority}{path}{location}")
+    } else if Uri::try_from(location).is_ok_and(|uri| uri.scheme().is_some()) {
+        location.to_owned()
+    } else {
+        let dir = &path[..=path.rfind('/').unwrap_or_default()];
+
+        format!("{scheme}://{authority}{dir}{location}")
+    };
+
+    Uri::try_from(resolved).ok()
 }
 
 /// Wraps a transport error as a final [`Error::Network`].
@@ -477,36 +668,67 @@ fn error_body(body: &mut Body) -> String {
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
-/// Parses a `Retry-After` header given as non-negative integer seconds.
+/// Parses a `Retry-After` header given as integer seconds, as Go's
+/// `strconv.Atoi` reads it; a negative value is ignored, `-0` is zero.
 fn retry_after(headers: &http::HeaderMap) -> Option<Duration> {
-    let secs = headers.get("Retry-After")?.to_str().ok()?.parse().ok()?;
+    let secs: i64 = headers.get("Retry-After")?.to_str().ok()?.parse().ok()?;
 
-    Some(Duration::from_secs(secs))
+    u64::try_from(secs).ok().map(Duration::from_secs)
 }
 
 /// Decodes a 200 body into a [`Response`], or the reason it is invalid.
 ///
 /// The body must be one JSON object with a non-null object `answers`.
+/// Every check reads the raw bytes, so members the [`Response`] ignores
+/// are never materialized and cannot fail the decode.
 fn decode(body: &[u8]) -> Result<Response, String> {
-    let value: Value = serde_json::from_slice(body)
-        .map_err(|err| format!("decode body: {err}"))?;
-
-    let Value::Object(members) = &value else {
-        return Err(if value.is_null() {
-            "body is null".into()
-        } else {
-            "body is not a JSON object".into()
-        });
-    };
-
-    match members.get("answers") {
-        None => return Err(r#"body has no "answers""#.into()),
-        Some(Value::Null) => return Err(r#""answers" is null"#.into()),
-        Some(Value::Object(_)) => {}
-        Some(_) => return Err(r#""answers" is not an object"#.into()),
+    /// The body's `answers` member, unparsed.
+    #[derive(Deserialize)]
+    struct Envelope<'a> {
+        /// The raw `answers` value, `null` included; `None` if absent.
+        #[serde(borrow, default, deserialize_with = "present")]
+        answers: Option<&'a RawValue>,
     }
 
-    Response::deserialize(value).map_err(|err| format!("decode body: {err}"))
+    let decode_err = |err: serde_json::Error| format!("decode body: {err}");
+
+    // Validates the syntax and rejects trailing values without building
+    // a tree; `get` excludes the surrounding whitespace.
+    let raw: &RawValue = serde_json::from_slice(body).map_err(decode_err)?;
+    let text = raw.get();
+
+    if text == "null" {
+        return Err("body is null".into());
+    }
+
+    if !text.starts_with('{') {
+        return Err("body is not a JSON object".into());
+    }
+
+    let envelope: Envelope = serde_json::from_str(text).map_err(decode_err)?;
+
+    let Some(answers) = envelope.answers else {
+        return Err(r#"body has no "answers""#.into());
+    };
+
+    if answers.get() == "null" {
+        return Err(r#""answers" is null"#.into());
+    }
+
+    if !answers.get().starts_with('{') {
+        return Err(r#""answers" is not an object"#.into());
+    }
+
+    serde_json::from_str(text).map_err(decode_err)
+}
+
+/// Serde helper: wraps a present raw value, `null` included, in `Some`,
+/// where a plain `Option` would turn `null` into `None`.
+fn present<'de, D>(d: D) -> Result<Option<&'de RawValue>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    <&RawValue>::deserialize(d).map(Some)
 }
 
 #[cfg(test)]
@@ -922,6 +1144,168 @@ mod tests {
         assert!(
             matches!(timed_result, Err(Error::Network(_))),
             "timed = {timed_result:?}"
+        );
+    }
+
+    #[test]
+    fn should_follow_307_and_308_replaying_the_body() {
+        for status in [307, 308] {
+            let server = MockServer::start();
+            server.mock(|when, then| {
+                when.method(POST).path(PATH);
+                then.status(status).header("Location", "/final");
+            });
+            let replayed = server.mock(|when, then| {
+                when.method(POST)
+                    .path("/final")
+                    .header("authorization", format!("Bearer {KEY}"))
+                    .header("content-type", "application/json")
+                    .body(r#"{"state":"x"}"#);
+                then.status(200).body(OK_BODY);
+            });
+
+            let result = client(&server).ask_raw(br#"{"state":"x"}"#);
+
+            assert!(result.is_ok(), "status {status}: {result:?}");
+            replayed.assert();
+        }
+    }
+
+    #[test]
+    fn should_keep_auth_on_same_host_redirect_and_drop_it_cross_host() {
+        let server = MockServer::start();
+        let other = MockServer::start();
+        server.mock(|when, then| {
+            when.method(POST).path(PATH).body("same");
+            then.status(302).header("Location", "/final");
+        });
+        server.mock(|when, then| {
+            when.method(POST).path(PATH).body("cross");
+            then.status(302)
+                .header("Location", format!("{}/final", other.base_url()));
+        });
+        let same = server.mock(|when, then| {
+            when.method(GET)
+                .path("/final")
+                .header("authorization", format!("Bearer {KEY}"))
+                .header_missing("content-type");
+            then.status(200).body(OK_BODY);
+        });
+        let cross = other.mock(|when, then| {
+            when.method(GET)
+                .path("/final")
+                .header_missing("authorization")
+                .header_missing("content-type");
+            then.status(200).body(OK_BODY);
+        });
+
+        let same_result = client(&server).ask_raw(b"same");
+        let cross_result = client(&server).ask_raw(b"cross");
+
+        assert!(same_result.is_ok(), "same = {same_result:?}");
+        assert!(cross_result.is_ok(), "cross = {cross_result:?}");
+        same.assert();
+        cross.assert();
+    }
+
+    #[test]
+    fn should_stop_after_ten_redirects() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST).path(PATH);
+            then.status(307).header("Location", PATH);
+        });
+
+        let err = client(&server).ask_raw(b"{}").unwrap_err();
+
+        mock.assert_calls(11);
+        assert_eq!(
+            err.to_string(),
+            "network failure: stopped after 10 redirects"
+        );
+    }
+
+    #[test]
+    fn should_report_network_when_location_is_missing() {
+        let server = MockServer::start();
+        serve(&server, 302, "");
+
+        let err = client(&server).ask_raw(b"{}").unwrap_err();
+
+        assert!(matches!(err, Error::Network(_)), "err = {err:?}");
+    }
+
+    #[rstest]
+    #[case::absolute("http://b:2/x?y", "http://b:2/x?y")]
+    #[case::scheme_relative("//b/x", "http://b/x")]
+    #[case::root_relative("/x?y#z", "http://a:1/x?y")]
+    #[case::query("?y", "http://a:1/v1/systemone?y")]
+    #[case::relative("final", "http://a:1/v1/final")]
+    fn should_resolve_redirect_location(
+        #[case] location: &str,
+        #[case] want: &str,
+    ) {
+        let base = Uri::from_static("http://a:1/v1/systemone?q");
+
+        let resolved = resolve(&base, location).map(|uri| uri.to_string());
+
+        assert_eq!(resolved.as_deref(), Some(want));
+    }
+
+    #[test]
+    fn should_decode_null_probability_as_zero() {
+        let body = r#"{"answers":{"q":{"type":"choice","choice":"a",
+            "confidence":1,"probabilities":{"a":null}}}}"#;
+
+        let resp = decode_ok(body).unwrap();
+
+        let (_, _, probabilities) = resp.choice("q").unwrap();
+        assert_eq!(probabilities, &BTreeMap::from([("a".to_owned(), 0.0)]));
+    }
+
+    #[test]
+    fn should_read_bodies_over_ten_mib() {
+        let filler = "x".repeat(11 << 20);
+        let body = format!(r#"{{"answers":{{}},"ignored":"{filler}"}}"#);
+
+        let result = decode_ok(&body);
+
+        assert!(result.is_ok(), "err = {:?}", result.err());
+    }
+
+    #[test]
+    fn should_ignore_unparseable_unknown_fields() {
+        let result = decode_ok(r#"{"answers":{},"ignored":1e400}"#);
+
+        assert!(result.is_ok(), "result = {result:?}");
+    }
+
+    #[test]
+    fn should_reject_duplicate_typed_fields() {
+        let body =
+            r#"{"answers":{"q":{"type":"noul","noul":"bad","noul":1}}}"#;
+
+        let message = response_message(decode_ok(body));
+
+        assert!(message.starts_with("decode body:"), "message = {message}");
+    }
+
+    #[test]
+    fn should_treat_retry_after_negative_zero_as_zero() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST).path(PATH);
+            then.status(503).header("Retry-After", "-0").body("busy");
+        });
+        let started = Instant::now();
+
+        client(&server).ask_raw(b"{}").unwrap_err();
+
+        let elapsed = started.elapsed();
+        mock.assert_calls(3);
+        assert!(
+            elapsed < Duration::from_millis(400),
+            "elapsed = {elapsed:?}"
         );
     }
 
