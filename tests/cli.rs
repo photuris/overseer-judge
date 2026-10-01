@@ -9,13 +9,14 @@
 // panic on setup failure for the same reason the tests do.
 #![expect(clippy::unwrap_used, reason = "test helpers")]
 
+#[cfg(unix)]
+use std::thread;
 use std::{
     fs,
     io::{BufRead, BufReader},
     net::TcpListener,
     path::{Path, PathBuf},
     process::{self, Output, Stdio},
-    thread,
     time::{Duration, Instant},
 };
 
