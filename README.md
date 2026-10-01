@@ -25,10 +25,12 @@ powershell -ExecutionPolicy Bypass -c "irm https://github.com/photuris/overseer-
 ```
 
 Both put the binary in `~/.local/bin` (`%USERPROFILE%\.local\bin` on
-Windows) and add that directory to `PATH` if needed. Check with
-`overseer-judge --version`. Linux and Windows binaries are statically
-linked; macOS binaries depend only on the system libraries. Archives
-named `overseer-judge-<target>.tar.xz` (`.zip` on Windows), each with a
+Windows) and add that directory to `PATH` if needed. If the installer
+added it, open a new terminal, or run the reload command the installer
+prints, before the next step. Check with `overseer-judge --version`.
+Linux and Windows binaries are statically linked. macOS binaries
+depend only on the system libraries. Archives named
+`overseer-judge-<target>.tar.xz` (`.zip` on Windows), each with a
 `.sha256` file, are on the
 [releases page](https://github.com/photuris/overseer-judge/releases/latest).
 
