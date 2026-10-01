@@ -25,7 +25,7 @@ use clap::{
 };
 use serde::Serialize;
 use serde_json::value::RawValue;
-use tracing::{Level, debug};
+use tracing::{Level, debug, warn};
 
 use crate::{
     config::{self, Config},
@@ -169,11 +169,12 @@ Example:
 /// `review --help` output sentence and example.
 const REVIEW_AFTER_HELP: &str = "\
 Output: JSON Lines, one object per item: id, severity, style_only, \
-responses, model, usage. --pretty is rejected: a record stays on one \
-line.
+responses, model, usage, warnings. --pretty is rejected: a record stays \
+on one line. A file with content and no items is a usage error (exit \
+2).
 
 Example:
-  overseer-judge review .overseer/reviews/round-04.md |
+  overseer-judge review .overseer/review/round-4.md |
     jq -c 'select(.style_only > 0.5)'";
 
 /// Flags whose next token is their value when written without `=`.
@@ -624,6 +625,9 @@ struct DryRun<'a> {
     /// The static findings of a task file too broken to judge.
     #[serde(skip_serializing_if = "Option::is_none")]
     r#static: Option<Vec<tasklint::Finding>>,
+    /// The review item's warnings, omitted when empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    warnings: Vec<review::Warning>,
 }
 
 impl DryRun<'_> {
@@ -634,6 +638,7 @@ impl DryRun<'_> {
             path: jev::PATH,
             body: Some(body),
             r#static: None,
+            warnings: Vec::new(),
         }
     }
 
@@ -1020,6 +1025,7 @@ impl Session<'_> {
                     path: "",
                     body: None,
                     r#static: Some(tasklint::static_checks(&doc)),
+                    warnings: Vec::new(),
                 }
             };
 
@@ -1041,8 +1047,9 @@ impl Session<'_> {
     ///
     /// # Errors
     ///
-    /// [`Error::Usage`] for `--pretty` or an unreadable file, else the
-    /// first client error; lines already written stay written.
+    /// [`Error::Usage`] for `--pretty`, an unreadable file, or a file
+    /// with content and no items, else the first client error; lines
+    /// already written stay written.
     fn review(
         &mut self,
         path: &str,
@@ -1058,19 +1065,37 @@ impl Session<'_> {
         }
 
         let bytes = read_input(path, stdin, &format!("read {path}"))?;
-        let items = review::parse(&String::from_utf8_lossy(&bytes));
+        let text = String::from_utf8_lossy(&bytes);
+        let items = review::parse(&text);
 
         debug!(items = items.len(), "parsed review round");
 
         // A round with no items needs no request, so no key either.
         if items.is_empty() {
-            return Ok(());
+            if text.trim().is_empty() {
+                return Ok(());
+            }
+            return Err(Error::Usage(format!(
+                "no review items in {path}: expected \"### R<n>-<nn>: \
+                 title\" headers"
+            )));
+        }
+
+        for item in &items {
+            for warning in &item.warnings {
+                warn!(
+                    id = %item.id,
+                    warning = warning.as_str(),
+                    "review item did not fully parse"
+                );
+            }
         }
 
         if self.globals.dry_run {
             for item in &items {
-                let record =
+                let mut record =
                     DryRun::request(review::request(item), self.model())?;
+                record.warnings.clone_from(&item.warnings);
 
                 write_json(stdout, &record, false)?;
             }

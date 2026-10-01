@@ -54,11 +54,13 @@ const REVIEW_ROUND: &str = "# Review round 1
 
 ### R1-01: First finding
 - severity: medium
+- status: open
 The first body.
 - response: fixed: done
 
 ### R1-02: Second finding
 - severity: low
+- status: open
 The second body.
 - response: fixed: also done
 ";
@@ -265,7 +267,10 @@ fn should_print_version() {
     let out = Sandbox::new().run("http://unused", None, &["--version"], "");
 
     assert_eq!(out.status.code(), Some(0));
-    assert_eq!(stdout(&out), "overseer-judge 0.2.0\n");
+    assert_eq!(
+        stdout(&out),
+        concat!("overseer-judge ", env!("CARGO_PKG_VERSION"), "\n")
+    );
 }
 
 #[test]
@@ -525,15 +530,136 @@ fn should_reject_pretty_on_review() {
 fn should_print_nothing_for_review_with_no_items_and_need_no_key() {
     let sandbox = Sandbox::new();
 
-    let out = sandbox.run(
-        "http://unused",
-        None,
-        &["review", "-"],
-        "# Review round 1\n\nNothing found.\n",
-    );
+    let out = sandbox.run("http://unused", None, &["review", "-"], "\n  \n");
 
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
     assert!(out.stdout.is_empty());
+}
+
+/// The review fixture `name`'s path, relative to the crate root.
+fn review_fixture(name: &str) -> String {
+    format!("tests/fixtures/review/{name}")
+}
+
+/// Runs `review --dry-run` on the review fixture `name` without a key.
+fn review_dry_run(name: &str, extra: &[&str]) -> Output {
+    let fixture = review_fixture(name);
+    let mut args = vec!["review", "--dry-run", fixture.as_str()];
+    args.extend(extra);
+
+    Sandbox::new().run("http://unused", None, &args, "")
+}
+
+/// Parses each stdout line of `out` as JSON.
+fn stdout_lines(out: &Output) -> Vec<Value> {
+    stdout(out)
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
+}
+
+/// The `warnings` arrays `mismatch-01.md` yields, in item order.
+const MISMATCH_WARNINGS: [&[&str]; 2] = [
+    &["missing_severity", "missing_status", "unparsed_response"],
+    &["text_after_response"],
+];
+
+/// Asserts the raw JSON `line` ends with a `warnings` key equal to
+/// `want`. Checked on the text: a parsed `Value` sorts its keys.
+fn assert_warnings_last(line: &str, want: &[&str]) {
+    let tail =
+        format!(",\"warnings\":{}}}", serde_json::to_string(want).unwrap());
+    assert!(line.ends_with(&tail), "want suffix {tail}: {line}");
+}
+
+#[test]
+fn should_exit_2_when_review_file_has_content_but_no_items() {
+    for extra in [&[][..], &["--dry-run"][..]] {
+        let fixture = review_fixture("no-items-01.md");
+        let mut args = vec!["review", fixture.as_str()];
+        args.extend(extra);
+
+        let out = Sandbox::new().run("http://unused", None, &args, "");
+
+        assert!(out.stdout.is_empty(), "{extra:?}: {}", stdout(&out));
+        let record = assert_failure(&out, 2, "usage");
+        let message = record["error"]["message"].as_str().unwrap();
+        assert!(message.starts_with("no review items in"), "{message}");
+    }
+}
+
+#[test]
+fn should_print_review_warnings_in_dry_run() {
+    let out = review_dry_run("mismatch-01.md", &[]);
+
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let text = stdout(&out);
+    assert_eq!(text.lines().count(), 2, "{text}");
+    for (line, want) in text.lines().zip(MISMATCH_WARNINGS) {
+        assert_warnings_last(line, want);
+    }
+}
+
+#[test]
+fn should_not_add_warnings_to_well_formed_rounds() {
+    for name in ["round-01.md", "round-02.md", "round-03.md"] {
+        let out = review_dry_run(name, &[]);
+
+        assert_eq!(out.status.code(), Some(0), "{name}: {}", stderr(&out));
+        assert_eq!(stderr(&out), "", "{name}");
+        let records = stdout_lines(&out);
+        assert!(!records.is_empty(), "{name}");
+        for record in &records {
+            assert!(record.get("warnings").is_none(), "{name}: {record}");
+        }
+    }
+}
+
+#[test]
+fn should_carry_warnings_on_typed_records() {
+    let server = MockServer::start();
+    let (first, second) = review_mocks(&server, Duration::ZERO, 200);
+    let sandbox = Sandbox::new();
+    let fixture = review_fixture("mismatch-01.md");
+
+    let out =
+        sandbox.run(&server.base_url(), Some(KEY), &["review", &fixture], "");
+
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    first.assert_calls(1);
+    second.assert_calls(1);
+    let text = stdout(&out);
+    assert_eq!(text.lines().count(), 2, "{text}");
+    for (line, want) in text.lines().zip(MISMATCH_WARNINGS) {
+        let record: Value = serde_json::from_str(line).unwrap();
+        assert!(record.get("style_only").is_some(), "{record}");
+        assert_warnings_last(line, want);
+    }
+}
+
+#[test]
+fn should_log_each_review_warning_once_at_warn() {
+    let out = review_dry_run("mismatch-01.md", &[]);
+    let text = stderr(&out);
+    let want = MISMATCH_WARNINGS
+        .iter()
+        .zip(["R1-01", "R1-02"])
+        .flat_map(|(names, id)| names.iter().map(move |name| (id, *name)));
+
+    assert_eq!(out.status.code(), Some(0), "{text}");
+    assert_eq!(text.lines().count(), 4, "{text}");
+    for (id, name) in want {
+        let hits = text
+            .lines()
+            .filter(|line| line.contains("WARN") && line.contains(name))
+            .collect::<Vec<_>>();
+        assert_eq!(hits.len(), 1, "{name}: {text}");
+        assert!(hits[0].contains(&format!("id={id}")), "{name}: {text}");
+    }
+
+    let quiet = review_dry_run("mismatch-01.md", &["--log-level", "error"]);
+    assert_eq!(quiet.status.code(), Some(0));
+    assert_eq!(stderr(&quiet), "");
 }
 
 /// Mocks one answer per review item; the second is delayed by `delay`
@@ -935,7 +1061,7 @@ fn should_write_one_interrupt_record_when_stderr_is_full() {
 fn should_never_cut_a_stdout_record_on_sigint() {
     let sandbox = Sandbox::new();
     let round = format!(
-        "### R1-01: Finding\n- severity: minor\n\n{}\n",
+        "### R1-01: Finding\n- severity: minor\n- status: open\n\n{}\n",
         "x".repeat(1 << 20)
     );
     let path = sandbox.file("round.md", &round);

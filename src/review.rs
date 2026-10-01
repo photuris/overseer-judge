@@ -72,7 +72,45 @@ static HEADER: LazyLock<Regex> = LazyLock::new(|| {
         .unwrap_or_else(|e| unreachable!("HEADER is a valid regex: {e}"))
 });
 
+/// Matches a body line that looks like a reply opener, such as
+/// `Response (fixed, abc1234): ...` or `#### Rebuttal`.
+static REPLY_LIKE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(concat!(
+        r"(?i)^\s*(?:[-*]\s+|#+\s+)?(?:\*\*)?",
+        r"(?:implementer\s+)?(?:response|rebuttal|reply)\b",
+    ))
+    .unwrap_or_else(|e| unreachable!("REPLY_LIKE is a valid regex: {e}"))
+});
+
 // ── Parsing ─────────────────────────────────────────────────────────────────
+
+/// One thing in an item that did not parse; declaration order is
+/// output order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Warning {
+    /// The item has no `- severity:` line.
+    MissingSeverity,
+    /// The item has no `- status:` line.
+    MissingStatus,
+    /// A body line outside a fence looks like a reply opener but is not
+    /// `- response:`.
+    UnparsedResponse,
+    /// A non-blank, unindented line ended a reply and was dropped.
+    TextAfterResponse,
+}
+
+impl Warning {
+    /// Returns the snake_case name, as serialized.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::MissingSeverity => "missing_severity",
+            Self::MissingStatus => "missing_status",
+            Self::UnparsedResponse => "unparsed_response",
+            Self::TextAfterResponse => "text_after_response",
+        }
+    }
+}
 
 /// One review finding with the implementer's responses.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -94,6 +132,10 @@ pub struct Item {
     pub body: String,
     /// Each response joined into one line, in document order.
     pub responses: Vec<String>,
+    /// What did not parse, in declaration order, each at most once.
+    /// Never serialized, so it never enters a request.
+    #[serde(skip)]
+    pub warnings: Vec<Warning>,
 }
 
 /// Where the parser is within an item.
@@ -125,10 +167,15 @@ struct Parser<'a> {
     /// Whether the item in progress has had a metadata line, which
     /// decides what a blank line in [`Mode::Meta`] means.
     saw_meta: bool,
+    /// Whether the item in progress has had a `- severity:` line.
+    saw_severity: bool,
+    /// Whether the item in progress has had a `- status:` line.
+    saw_status: bool,
 }
 
 /// Extracts items in document order; a file with no items yields an
-/// empty `Vec`.
+/// empty `Vec`. Each [`Item`]'s `warnings` field names what in that
+/// item did not parse.
 ///
 /// Every `\r` is removed first, so CRLF input parses as LF. An item
 /// starts at a `### R<n>-<nn>: title` header outside a fenced block,
@@ -140,6 +187,12 @@ struct Parser<'a> {
 /// allowed when the next line is indented; a line that ends a response
 /// without being a terminator is ignored, as is everything up to the
 /// next terminator.
+///
+/// The warnings: [`Warning::MissingSeverity`] and
+/// [`Warning::MissingStatus`] when the metadata block lacks that line;
+/// [`Warning::UnparsedResponse`] when a body line outside a fence looks
+/// like a reply opener; [`Warning::TextAfterResponse`] when a non-blank
+/// line ended a response.
 pub fn parse(text: &str) -> Vec<Item> {
     let text = text.replace('\r', "");
     let lines: Vec<&str> = text
@@ -155,6 +208,8 @@ pub fn parse(text: &str) -> Vec<Item> {
         resp: Vec::new(),
         mode: Mode::Seek,
         saw_meta: false,
+        saw_severity: false,
+        saw_status: false,
     };
     let mut fenced = false;
     for (i, &line) in lines.iter().enumerate() {
@@ -194,6 +249,12 @@ impl<'a> Parser<'a> {
         {
             self.start_response(first);
         } else {
+            // Only Meta and Body append a non-blank line to the body.
+            if matches!(self.mode, Mode::Meta | Mode::Body)
+                && REPLY_LIKE.is_match(line)
+            {
+                self.warn(Warning::UnparsedResponse);
+            }
             self.content(line, next);
         }
     }
@@ -224,6 +285,9 @@ impl<'a> Parser<'a> {
             }
             Mode::Response if blank && next.starts_with("  ") => {}
             Mode::Response => {
+                if !blank {
+                    self.warn(Warning::TextAfterResponse);
+                }
                 self.end_response();
                 self.mode = Mode::Seek;
             }
@@ -241,9 +305,19 @@ impl<'a> Parser<'a> {
             status: String::new(),
             body: String::new(),
             responses: Vec::new(),
+            warnings: Vec::new(),
         });
         self.mode = Mode::Meta;
         self.saw_meta = false;
+        self.saw_severity = false;
+        self.saw_status = false;
+    }
+
+    /// Records `warning` on the item in progress.
+    fn warn(&mut self, warning: Warning) {
+        if let Some(cur) = self.cur.as_mut() {
+            cur.warnings.push(warning);
+        }
     }
 
     /// Records one metadata line of the item in progress.
@@ -253,8 +327,14 @@ impl<'a> Parser<'a> {
         let Some(cur) = self.cur.as_mut() else { return };
         let field = match key {
             "file" => &mut cur.file,
-            "severity" => &mut cur.severity,
-            _ => &mut cur.status,
+            "severity" => {
+                self.saw_severity = true;
+                &mut cur.severity
+            }
+            _ => {
+                self.saw_status = true;
+                &mut cur.status
+            }
         };
         value.trim().clone_into(field);
     }
@@ -296,6 +376,14 @@ impl<'a> Parser<'a> {
                 .rposition(|line| !line.trim().is_empty())
                 .map_or(0, |last| last + 1);
             cur.body = self.body[..end].join("\n");
+            if !self.saw_severity {
+                cur.warnings.push(Warning::MissingSeverity);
+            }
+            if !self.saw_status {
+                cur.warnings.push(Warning::MissingStatus);
+            }
+            cur.warnings.sort_unstable();
+            cur.warnings.dedup();
             self.items.push(cur);
         }
         self.body.clear();
@@ -340,6 +428,9 @@ pub struct Typed {
     pub model: String,
     /// Tokens the request consumed.
     pub usage: jev::Usage,
+    /// The item's warnings, omitted when empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<Warning>,
 }
 
 /// Returns the question id for the `n`th response.
@@ -448,6 +539,7 @@ pub fn judge_item(
         responses,
         model: resp.model,
         usage: resp.usage,
+        warnings: item.warnings.clone(),
     })
 }
 
@@ -511,6 +603,7 @@ mod tests {
             status: String::new(),
             body: String::new(),
             responses: responses.iter().map(|&r| r.to_owned()).collect(),
+            warnings: Vec::new(),
         }
     }
 
@@ -662,6 +755,10 @@ mod tests {
             [item("R1-01", "", &[])].map(|it| Item {
                 title: "t".into(),
                 body: "body".into(),
+                warnings: vec![
+                    Warning::MissingSeverity,
+                    Warning::MissingStatus,
+                ],
                 ..it
             })
         );
@@ -794,10 +891,169 @@ mod tests {
             responses: Vec::new(),
             model: "m".into(),
             usage: jev::Usage::default(),
+            warnings: Vec::new(),
         };
         assert_eq!(
             serde_json::to_string(&typed).unwrap(),
             r#"{"id":"R1-01","style_only":0.5,"responses":[],"model":"m","usage":{"input_tokens":0,"output_tokens":0}}"#
+        );
+    }
+
+    /// Returns the warnings of the only item in `text`.
+    fn warnings(text: &str) -> Vec<Warning> {
+        let items = parse(text);
+        assert_eq!(items.len(), 1, "{items:#?}");
+        items[0].warnings.clone()
+    }
+
+    #[test]
+    fn should_warn_missing_severity() {
+        let has =
+            |text: &str| warnings(text).contains(&Warning::MissingSeverity);
+        assert!(has("### R1-01: t\n- status: open\n\nbody\n"));
+        assert!(!has("### R1-01: t\n- severity: \n- status: open\n"));
+        assert!(has("### R1-01: t\n- severity:\n- status: open\n"));
+        assert!(has(
+            "### R1-01: t\n- status: open\n\n```\n- severity: minor\n```\n"
+        ));
+        assert!(has(
+            "### R1-01: t\n- status: open\n\nbody\n\n- response: ok\n\
+             - severity: minor\n"
+        ));
+    }
+
+    #[test]
+    fn should_warn_missing_status() {
+        let has =
+            |text: &str| warnings(text).contains(&Warning::MissingStatus);
+        assert!(has("### R1-01: t\n- severity: minor\n\nbody\n"));
+        assert!(has(
+            "### R1-01: t\n- severity: minor\n\n- status: open\nbody\n"
+        ));
+        assert!(!has("### R1-01: t\n- severity: minor\n- status: open\n"));
+    }
+
+    #[test]
+    fn should_warn_unparsed_response() {
+        let head = "### R1-01: t\n- severity: minor\n- status: open\n\n\
+                    body\n\n";
+        let has = |tail: &str| {
+            warnings(&format!("{head}{tail}"))
+                .contains(&Warning::UnparsedResponse)
+        };
+        for line in [
+            "Response (fixed, 3dfc1be): the limiter reads burst.",
+            "Implementer response: fixed in 3dfc1be.",
+            "**Response (fixed, sha):** done.",
+            "Rebuttal (evidence): see tests/a.py:3.",
+            "#### Response",
+            "- Response (fixed): done.",
+        ] {
+            assert!(has(&format!("{line}\n")), "{line}");
+        }
+        assert!(!has("The limiter was fixed in 3dfc1be, says the log.\n"));
+        assert!(!has("```\nResponse (fixed): quoted.\n```\n"));
+        assert!(!has("- response: fixed in 3dfc1be.\n"));
+    }
+
+    #[test]
+    fn should_warn_text_after_response() {
+        let mismatch = parse(&fixture("mismatch-01.md"));
+        assert!(mismatch[1].warnings.contains(&Warning::TextAfterResponse));
+
+        let head = "### R1-01: t\n- severity: minor\n- status: open\n\n\
+                    body\n\n- response: ok\n  more\n";
+        for tail in [
+            "\nprose after a blank line\n",
+            "### R1-02: u\n- severity: minor\n- status: open\n",
+            "---\n",
+            "- response: again\n",
+        ] {
+            for it in parse(&format!("{head}{tail}")) {
+                assert!(
+                    !it.warnings.contains(&Warning::TextAfterResponse),
+                    "{tail:?}: {it:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn should_order_and_dedupe_warnings() {
+        // Two reply-like body lines, two replies each ended by text.
+        let got = warnings(
+            "### R1-01: t\n\nResponse (fixed): x\nReply: y\n\n\
+             - response: a\ndropped\n- response: b\ndropped again\n",
+        );
+        assert_eq!(
+            got,
+            [
+                Warning::MissingSeverity,
+                Warning::MissingStatus,
+                Warning::UnparsedResponse,
+                Warning::TextAfterResponse,
+            ]
+        );
+        let names: Vec<&str> = got.iter().map(|w| w.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "missing_severity",
+                "missing_status",
+                "unparsed_response",
+                "text_after_response",
+            ]
+        );
+    }
+
+    #[test]
+    fn should_report_fixture_warnings() {
+        let got: Vec<Vec<Warning>> = parse(&fixture("mismatch-01.md"))
+            .into_iter()
+            .map(|it| it.warnings)
+            .collect();
+        assert_eq!(
+            got,
+            [
+                vec![
+                    Warning::MissingSeverity,
+                    Warning::MissingStatus,
+                    Warning::UnparsedResponse,
+                ],
+                vec![Warning::TextAfterResponse],
+            ]
+        );
+
+        for name in ["round-01.md", "round-02.md", "round-03.md"] {
+            for it in parse(&fixture(name)) {
+                assert!(
+                    it.warnings.is_empty(),
+                    "{name} {}: {:?}",
+                    it.id,
+                    it.warnings
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn should_serialize_typed_warnings_last_and_omit_when_empty() {
+        let mut typed = Typed {
+            id: "R1-01".into(),
+            severity: String::new(),
+            style_only: 0.5,
+            responses: Vec::new(),
+            model: "m".into(),
+            usage: jev::Usage::default(),
+            warnings: Vec::new(),
+        };
+        assert!(!serde_json::to_string(&typed).unwrap().contains("warnings"));
+
+        typed.warnings =
+            vec![Warning::MissingSeverity, Warning::TextAfterResponse];
+        assert_eq!(
+            serde_json::to_string(&typed).unwrap(),
+            r#"{"id":"R1-01","style_only":0.5,"responses":[],"model":"m","usage":{"input_tokens":0,"output_tokens":0},"warnings":["missing_severity","text_after_response"]}"#
         );
     }
 }

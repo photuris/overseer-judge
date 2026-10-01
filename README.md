@@ -255,8 +255,29 @@ overseer-judge review tests/fixtures/review/round-01.md |
 
 The path is positional and comes after the flags. `-` reads the file
 from stdin. Output is JSON Lines, one object per item, written as each
-item's answer arrives; a file with no items prints nothing and exits
-0. `--pretty` is a usage error here.
+item's answer arrives. `--pretty` is a usage error here.
+
+A file with content and no items is a usage error: exit 2, with a
+message that names the expected `### R<n>-<nn>: title` header. Empty
+or all-whitespace input prints nothing and exits 0.
+
+This is the layout the parser accepts, taken from the first item of
+`tests/fixtures/review/round-01.md` and shortened:
+
+```markdown
+### R6-01: Pending re-run can start a batch while the editor is open
+- file: src/shell/controller.cpp:1055
+- severity: medium
+- status: resolved
+`rerunPending()` only rejects busy, resolving, and recording states.
+- response: fixed in `rerunPending`, which now refuses with
+  `close the mapping editor first` before any other check.
+```
+
+The parser is strict. A header is `###`, then the id, a colon, and the
+title. The metadata lines start with `- ` and use `: ` after the key.
+A reply starts with `- response:`, and each continuation line is
+indented two spaces.
 
 The parser is fence-aware. A `### R9-99:` header or a `---` line
 inside a fenced code block is body text, not a new item, so a finding
@@ -284,6 +305,23 @@ stays the overseer's call:
  "probabilities":{"fixed":0.91,"evidence":0.06}}],
  "model":"jev-latest","usage":{"input_tokens":880,"output_tokens":7}}
 ```
+
+When part of an item does not match the layout, the record carries a
+`warnings` array that names what did not parse:
+
+| Warning               | Condition                                                                       |
+|-----------------------|---------------------------------------------------------------------------------|
+| `missing_severity`    | The item has no `- severity:` line.                                             |
+| `missing_status`      | The item has no `- status:` line.                                               |
+| `unparsed_response`   | A body line outside a fence looks like a reply opener but is not `- response:`. |
+| `text_after_response` | A non-blank, unindented line ended a reply and was dropped.                     |
+
+The strings appear in table order, each at most once per item.
+`warnings` is the last field of the record, beside `body` in a
+`--dry-run` record, and is omitted when empty. Each warning is also
+logged once at `warn` level on stderr. Warnings never change the exit
+code: an item with warnings is still typed and printed. The JSON
+example above is a well-formed item, so it has no `warnings` field.
 
 One request goes out per item, sequentially; the first failure aborts
 the run, so a partial round can reach stdout before the error record
