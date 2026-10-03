@@ -292,11 +292,17 @@ stays the overseer's call:
 | `agree`    | accepts it without claiming a fix yet             |
 
 ```json
-{"id":"R6-01","severity":"medium","style_only":0.04,
- "responses":[{"kind":"fixed","confidence":0.91,
+{"id":"R6-01","severity":"medium","status":"resolved",
+ "style_only":0.04,"responses":[{"kind":"fixed","confidence":0.91,
  "probabilities":{"fixed":0.91,"evidence":0.06}}],
  "model":"jev-latest","usage":{"input_tokens":880,"output_tokens":7}}
 ```
+
+`status` is the item's `- status:` value, printed after `severity`
+and omitted when the item has none. It is never sent to the model.
+An overseer reads it to tell an item nobody answered (`responses`
+empty, `status` `open`, no `warnings`) from one the overseer closed
+itself.
 
 When part of an item does not match the layout, the record carries a
 `warnings` array that names what did not parse:

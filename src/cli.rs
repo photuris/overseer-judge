@@ -168,10 +168,10 @@ Example:
 
 /// `review --help` output sentence and example.
 const REVIEW_AFTER_HELP: &str = "\
-Output: JSON Lines, one object per item: id, severity, style_only, \
-responses, model, usage, warnings. --pretty is rejected: a record stays \
-on one line. A file with content and no items is a usage error (exit \
-2).
+Output: JSON Lines, one object per item: id, severity, status, \
+style_only, responses, model, usage, warnings. --pretty is rejected: a \
+record stays on one line. A file with content and no items is a usage \
+error (exit 2).
 
 Example:
   overseer-judge review .overseer/review/round-4.md |

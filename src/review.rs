@@ -420,6 +420,9 @@ pub struct Typed {
     /// The item's severity, omitted when empty.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub severity: String,
+    /// The item's status, omitted when empty.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub status: String,
     /// Probability that the finding is purely a style remark.
     pub style_only: f64,
     /// One classification per response, in order.
@@ -535,6 +538,7 @@ pub fn judge_item(
     Ok(Typed {
         id: item.id.clone(),
         severity: item.severity.clone(),
+        status: item.status.clone(),
         style_only,
         responses,
         model: resp.model,
@@ -887,6 +891,7 @@ mod tests {
         let typed = Typed {
             id: "R1-01".into(),
             severity: String::new(),
+            status: String::new(),
             style_only: 0.5,
             responses: Vec::new(),
             model: "m".into(),
@@ -1041,6 +1046,7 @@ mod tests {
         let mut typed = Typed {
             id: "R1-01".into(),
             severity: String::new(),
+            status: String::new(),
             style_only: 0.5,
             responses: Vec::new(),
             model: "m".into(),
@@ -1054,6 +1060,31 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&typed).unwrap(),
             r#"{"id":"R1-01","style_only":0.5,"responses":[],"model":"m","usage":{"input_tokens":0,"output_tokens":0},"warnings":["missing_severity","text_after_response"]}"#
+        );
+    }
+
+    #[test]
+    fn should_serialize_typed_status_after_severity_and_omit_when_empty() {
+        let mut typed = Typed {
+            id: "R1-01".into(),
+            severity: "minor".into(),
+            status: "open".into(),
+            style_only: 0.5,
+            responses: Vec::new(),
+            model: "m".into(),
+            usage: jev::Usage::default(),
+            warnings: Vec::new(),
+        };
+        assert_eq!(
+            serde_json::to_string(&typed).unwrap(),
+            r#"{"id":"R1-01","severity":"minor","status":"open","style_only":0.5,"responses":[],"model":"m","usage":{"input_tokens":0,"output_tokens":0}}"#
+        );
+
+        typed.status = String::new();
+        assert!(
+            !serde_json::to_string(&typed)
+                .unwrap()
+                .contains("\"status\"")
         );
     }
 }

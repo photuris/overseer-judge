@@ -638,6 +638,46 @@ fn should_carry_warnings_on_typed_records() {
 }
 
 #[test]
+fn should_print_status_on_typed_records() {
+    let server = MockServer::start();
+    let (first, second) = review_mocks(&server, Duration::ZERO, 200);
+    let sandbox = Sandbox::new();
+    let fixture = review_fixture("mismatch-01.md");
+
+    let out =
+        sandbox.run(&server.base_url(), Some(KEY), &["review", &fixture], "");
+
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    first.assert_calls(1);
+    second.assert_calls(1);
+    let text = stdout(&out);
+    let lines = text.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 2, "{text}");
+    let records = lines
+        .iter()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(records[0]["id"], "R1-01");
+    assert!(records[0].get("status").is_none(), "{}", lines[0]);
+    assert_eq!(records[1]["id"], "R1-02");
+    assert_eq!(records[1]["status"], "open");
+    assert!(
+        lines[1].starts_with(r#"{"id":"R1-02","severity":"minor","#),
+        "{}",
+        lines[1]
+    );
+    assert!(
+        lines[1]
+            .contains(r#""severity":"minor","status":"open","style_only":"#),
+        "{}",
+        lines[1]
+    );
+    for (line, want) in lines.iter().zip(MISMATCH_WARNINGS) {
+        assert_warnings_last(line, want);
+    }
+}
+
+#[test]
 fn should_log_each_review_warning_once_at_warn() {
     let out = review_dry_run("mismatch-01.md", &[]);
     let text = stderr(&out);
