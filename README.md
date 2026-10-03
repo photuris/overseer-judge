@@ -93,6 +93,10 @@ overseer-judge task --dry-run tests/fixtures/tasklint/good-01.md \
   | jq .body.questions
 ```
 
+Pipe stdout alone. Diagnostics, including the review `warnings`, go
+to stderr as log lines, so `2>&1` puts text in the stream and breaks
+`jq`. Read stderr separately, or pass `--log-level error`.
+
 ### `session`
 
 `session` reads the tail of a coding agent's terminal pane and says
